@@ -436,7 +436,7 @@ def main():
         for j in range(i+1, nrows*ncols):
             axesC[j].axis("off")
 
-        figC.suptitle(f"Radial Importances (Unified Scale) - {outcome_col}", fontsize=14)
+        figC.suptitle(f"Radial Importances - {outcome_col}", fontsize=14)
         legend_elems = []
         the_color = outcome_colors.get(outcome_col, fallback_color)
         line = plt.Line2D([0], [0], color=the_color, lw=2, label=outcome_col)

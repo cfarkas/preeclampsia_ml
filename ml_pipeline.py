@@ -168,6 +168,7 @@ def main():
 
     # Define outcomes, classifiers, color map
     outcomes_to_predict = [
+        'preeclampsia_onset'
         'gestational_age_delivery',
         'delivery_type',
         'newborn_weight',

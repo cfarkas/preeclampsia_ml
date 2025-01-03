@@ -168,8 +168,7 @@ def main():
 
     # Define outcomes, classifiers, color map
     outcomes_to_predict = [
-        'preeclampsia_onset'
-        'gestational_age_delivery',
+        'preeclampsia_onset',
         'delivery_type',
         'newborn_weight',
         'newborn_vital_status',
@@ -210,7 +209,7 @@ def main():
     }
     method_names = list(classifiers.keys())
 
-    # Regression for newborn_weight
+    # Regression for newborn_weight, gestational_age_delivery
     regressors = {
         "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
         "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=42)

@@ -506,7 +506,7 @@ def main():
     # 4) One final F1 heatmap
     print("\n[INFO] Generating unified F1 score heatmap across all outcomes & methods...")
     f1_heatmap_path = os.path.join(output_dir, "f1_scores_heatmap.pdf")
-    plt.figure(figsize=(1.5*len(method_names), 1.2*len(classification_outcomes)))
+    plt.figure(figsize=(1.6*len(method_names), 1.3*len(classification_outcomes)))
     # Only classification outcomes in F1
     class_f1_df = f1_df.loc[classification_outcomes, method_names]
     sns.heatmap(class_f1_df, annot=True, cmap='viridis', fmt=".2f")

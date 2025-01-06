@@ -1,7 +1,7 @@
 # preeclampsia_ml
 machine learning method for prediction outcomes in preeclampsia
 
-### Execution
+### Install & Execution
 ```
 git clone https://github.com/cfarkas/preeclampsia_ml.git
 cd preeclampsia_ml

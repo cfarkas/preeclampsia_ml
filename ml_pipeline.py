@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# coding: utf-8
 
 ###############################################################################
 # Environment creation logic
@@ -12,10 +13,10 @@ ENV_NAME = "ml_preeclampsia"
 def conda_env_exists(env_name=ENV_NAME):
     try:
         result = subprocess.run(
-        ["conda", "env", "list"],
-        capture_output=True,
-        text=True,
-        check=True
+            ["conda", "env", "list"],
+            capture_output=True,
+            text=True,
+            check=True
         )
         env_list = result.stdout
         for line in env_list.splitlines():
@@ -43,7 +44,7 @@ def create_conda_env_if_needed(env_name=ENV_NAME):
             print(f"[INFO] Checking installed tools in '{env_name}'...")
             subprocess.run(["conda", "run", "-n", env_name, "python", "-c",
                             "import sklearn; print('[INFO] scikit-learn version:', sklearn.__version__)"],
-                            check=True)
+                           check=True)
 
             print(f"[INFO] Environment '{env_name}' created and packages installed!")
         else:
@@ -69,12 +70,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     accuracy_score,
+    recall_score,
     classification_report,
     confusion_matrix,
-    f1_score,
     mean_squared_error,
     r2_score
 )
+
+# ADDED: MLPClassifier
+from sklearn.neural_network import MLPClassifier
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -116,9 +120,7 @@ def parse_arguments():
     )
     return parser.parse_args()
 
-
 def main():
-    # 1) Preliminary parse to see if --install_conda was passed
     args = parse_arguments()
 
     if args.install_conda:
@@ -144,9 +146,7 @@ def main():
     output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
 
-    # ===============================================
     # 1) Load Data, create correlation matrix once
-    # ===============================================
     data = pd.read_csv(input_csv, delimiter=';', index_col='id')
 
     corr_matrix = data.corr()
@@ -165,26 +165,26 @@ def main():
     plt.savefig(corr_path, bbox_inches='tight')
     plt.close()
 
-    # Define outcomes, classifiers, color map
-    outcomes_to_predict = [
-        'preeclampsia_onset',
-        'delivery_type',
-        'newborn_weight',
-        'newborn_vital_status',
-        'newborn_malformations',
-        'eclampsia_hellp',
-        'iugr'
+    # 2) We consider 'gestational_age_delivery' AND 'newborn_weight' as continuous
+    #    We'll do classification for the rest, including 'preeclampsia_onset'.
+    all_outcomes = [
+        "gestational_age_delivery",  # continuous
+        "newborn_weight",            # continuous
+        "preeclampsia_onset",        # classification
+        "delivery_type",
+        "newborn_vital_status",
+        "newborn_malformations",
+        "eclampsia_hellp",
+        "iugr"
     ]
+    continuous_outcomes = ["gestational_age_delivery", "newborn_weight"]
+    classification_outcomes = [o for o in all_outcomes if o not in continuous_outcomes]
 
-    # We'll do separate classification for everything except newborn_weight
-    classification_outcomes = [o for o in outcomes_to_predict if o != 'newborn_weight']
-    regression_outcome = 'newborn_weight'  # continuous variable
-
-    # Color map for each outcome
     outcome_colors = {
         'gestational_age_delivery': 'red',
-        'delivery_type': 'blue',
         'newborn_weight': 'green',
+        'preeclampsia_onset': 'navy',
+        'delivery_type': 'blue',
         'newborn_vital_status': 'purple',
         'newborn_malformations': 'orange',
         'eclampsia_hellp': 'cyan',
@@ -192,7 +192,7 @@ def main():
     }
     fallback_color = "gray"
 
-    # Classification
+    # 3) Classification methods
     classifiers = {
         "LogisticRegression": LogisticRegression(
             penalty=None, dual=False, random_state=15,
@@ -205,35 +205,32 @@ def main():
         "Random Forest": RandomForestClassifier(bootstrap=False, random_state=15),
         "GradientBoosting": GradientBoostingClassifier(max_depth=5, random_state=15),
         "SVM": SVC(probability=True, random_state=15),
+        # ADDED MLP
+        "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=15)
     }
     method_names = list(classifiers.keys())
 
-    # Regression for newborn_weight, gestational_age_delivery
+    # Regressors for continuous
     regressors = {
         "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
         "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=42)
     }
 
-    f1_df = pd.DataFrame(0.0, index=outcomes_to_predict, columns=method_names)
-
-    # For generating final radial plot overlay, we need a structure
-    method_importances = {out: {} for out in outcomes_to_predict}
-
-    # For confusion matrices
+    # We'll store recall for classification
+    recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names)
+    method_importances = {out: {} for out in all_outcomes}
     method_conf_matrices = {out: {} for out in classification_outcomes}
 
     # Classification loop
     for outcome_col in classification_outcomes:
-        print(f"\n=== PREDICTING OUTCOME: {outcome_col} ===")
+        print(f"\n=== Classification for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
-        # remove other outcomes
-        others = [o for o in outcomes_to_predict if o != outcome_col]
+        others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
             if o_ in X.columns:
                 X = X.drop(columns=[o_])
         y = data[outcome_col].copy()
 
-        # encode
         for c in X.columns:
             if X[c].dtype == 'object':
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
@@ -260,16 +257,16 @@ def main():
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
-            f1_sc = f1_score(y_test, y_pred, average='macro')
-            f1_df.loc[outcome_col, model_name] = f1_sc
+            # Use recall
+            rec_ = recall_score(y_test, y_pred, average='macro')
+            recall_df.loc[outcome_col, model_name] = rec_
 
-            conf = confusion_matrix(y_test, y_pred)
-            method_conf_matrices[outcome_col][model_name] = conf
+            conf_ = confusion_matrix(y_test, y_pred)
+            method_conf_matrices[outcome_col][model_name] = conf_
 
             try:
                 perm_res = permutation_importance(
-                    clf, X_test, y_test, n_repeats=5,
-                    random_state=15, n_jobs=-1
+                    clf, X_test, y_test, n_repeats=5, random_state=15, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
             except Exception as e:
@@ -278,16 +275,15 @@ def main():
 
             method_importances[outcome_col][model_name] = importances
 
-    # Regression for newborn_weight
-    if regression_outcome in outcomes_to_predict:
-        outreg = regression_outcome
-        print(f"\n=== REGRESSION for outcome: {outreg} ===")
-        X = data.drop(columns=[outreg])
-        others = [o for o in outcomes_to_predict if o != outreg]
+    # Regression loop
+    for outcome_col in continuous_outcomes:
+        print(f"\n=== Regression for outcome: {outcome_col} ===")
+        X = data.drop(columns=[outcome_col])
+        others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
             if o_ in X.columns:
                 X = X.drop(columns=[o_])
-        y = data[outreg].copy()
+        y = data[outcome_col].copy()
 
         for c in X.columns:
             if X[c].dtype == 'object':
@@ -301,9 +297,8 @@ def main():
         X_test = scaler.transform(X_test)
         feat_names = np.array(X.columns)
 
-        # store them in method_importances[outreg][method_name]
         for regr_name, regr in regressors.items():
-            print(f"  Training {regr_name} for {outreg} ...")
+            print(f"  Training {regr_name} for {outcome_col} ...")
             regr.fit(X_train, y_train)
             y_pred = regr.predict(X_test)
             mse_ = mean_squared_error(y_test, y_pred)
@@ -316,17 +311,13 @@ def main():
                 )
                 importances = perm_res.importances_mean
             except Exception as e:
-                print(f"[WARN] Permutation importance failed for {regr_name}/{outreg}: {e}")
+                print(f"[WARN] Perm. importance failed for {regr_name}/{outcome_col}: {e}")
                 importances = np.zeros(len(feat_names))
 
-            method_importances[outreg][regr_name] = importances
+            method_importances[outcome_col][regr_name] = importances
 
-    # =========================================================
-    # Generate combined confusion, permutation, radial
-    # EXACTLY as before, but skipping for newborn_weight
-    # =========================================================
-    classification_only = [o for o in outcomes_to_predict if o != regression_outcome]
-
+    # 3) Generate combined confusion, permutation, radial
+    classification_only = [o for o in classification_outcomes]
     for outcome_col in classification_only:
         # pdfA
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
@@ -360,27 +351,32 @@ def main():
         figA.savefig(pdfA_path)
         plt.close(figA)
 
-        # pdfB
+        # pdfB => bar charts, but now we increase the figure's HEIGHT
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
-        figB, axesB = plt.subplots(nrows=nrows, ncols=ncols, figsize=(6*ncols, 4*nrows))
-        if nrows*ncols == 1:
+        nrowsB, ncolsB = nrows, ncols
+        figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))  # <== increased height
+        if nrowsB*ncolsB == 1:
             axesB = [axesB]
         else:
             axesB = axesB.flatten()
 
+        Xtemp = data.drop(columns=[outcome_col])
+        for o_ in all_outcomes:
+            if o_ != outcome_col and o_ in Xtemp.columns:
+                Xtemp = Xtemp.drop(columns=[o_])
+        feat_names = list(Xtemp.columns)
+
         for i, method_name in enumerate(method_names):
             imps = method_importances[outcome_col][method_name]
             sorted_idx = np.argsort(imps)[::-1]
-            # Keep the full names in pdfB
-            # We'll just fallback to a numeric name if we can't easily retrieve
-            feat_labels_temp = [f"feature_{k}" for k in range(len(imps))]
             ax_ = axesB[i]
-            ax_.barh([feat_labels_temp[k] for k in sorted_idx], imps[sorted_idx], color='skyblue')
+            feat_labels_temp = [feat_names[k] for k in sorted_idx]
+            ax_.barh(feat_labels_temp, imps[sorted_idx], color='skyblue')
             ax_.invert_yaxis()
             ax_.set_title(method_name, fontsize=10)
             ax_.set_xlabel("Mean Decrease")
 
-        for j in range(i+1, nrows*ncols):
+        for j in range(i+1, nrowsB*ncolsB):
             axesB[j].axis("off")
 
         figB.suptitle(f"Permutation Importances - {outcome_col}", fontsize=14)
@@ -388,20 +384,19 @@ def main():
         figB.savefig(pdfB_path)
         plt.close(figB)
 
-        # pdfC
+        # pdfC => radial
         pdfC_path = os.path.join(output_dir, f"pdfC_{outcome_col}.pdf")
-        n_methods = len(method_names)
         if n_methods <= 4:
-            nrows, ncols = 1, n_methods
+            nrowsC, ncolsC = 1, n_methods
         elif n_methods <= 6:
-            nrows, ncols = 2, 3
+            nrowsC, ncolsC = 2, 3
         else:
-            nrows, ncols = 2, 4
+            nrowsC, ncolsC = 2, 4
 
-        figC, axesC = plt.subplots(nrows=nrows, ncols=ncols,
-                                   figsize=(6*ncols, 5*nrows),
+        figC, axesC = plt.subplots(nrows=nrowsC, ncols=ncolsC,
+                                   figsize=(6*ncolsC, 5*nrowsC),
                                    subplot_kw=dict(polar=True))
-        if nrows*ncols == 1:
+        if nrowsC*ncolsC == 1:
             axesC = [axesC]
         else:
             axesC = axesC.flatten()
@@ -414,7 +409,6 @@ def main():
             imps = method_importances[outcome_col][method_name]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
-            # We'll do fallback short labels
             short_labels_for_plot = [f"F{k+1}" for k in sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
@@ -432,10 +426,10 @@ def main():
             ax_.set_ylim(0, max(global_max, 0))
             ax_.set_title(method_name, fontsize=10)
 
-        for j in range(i+1, nrows*ncols):
+        for j in range(i+1, nrowsC*ncolsC):
             axesC[j].axis("off")
 
-        figC.suptitle(f"Radial Importances - {outcome_col}", fontsize=14)
+        figC.suptitle(f"Radial Importances (Unified Scale) - {outcome_col}", fontsize=14)
         legend_elems = []
         the_color = outcome_colors.get(outcome_col, fallback_color)
         line = plt.Line2D([0], [0], color=the_color, lw=2, label=outcome_col)
@@ -445,31 +439,30 @@ def main():
         figC.savefig(pdfC_path)
         plt.close(figC)
 
-    # If newborn_weight => do radial for reg
-    if regression_outcome in outcomes_to_predict:
-        outreg = regression_outcome
+    # If continuous, do radial for reg
+    for outcome_col in continuous_outcomes:
         reg_method_names = list(regressors.keys())
-        pdfC_reg_path = os.path.join(output_dir, f"pdfC_{outreg}_regression.pdf")
+        pdfC_reg_path = os.path.join(output_dir, f"pdfC_{outcome_col}_regression.pdf")
 
         if len(reg_method_names) <= 4:
-            nrows, ncols = 1, len(reg_method_names)
+            nrowsR, ncolsR = 1, len(reg_method_names)
         else:
-            nrows, ncols = 2, 2
+            nrowsR, ncolsR = 2, 2
 
-        figCreg, axesCreg = plt.subplots(nrows=nrows, ncols=ncols,
-                                         figsize=(6*ncols, 5*nrows),
+        figCreg, axesCreg = plt.subplots(nrows=nrowsR, ncols=ncolsR,
+                                         figsize=(6*ncolsR, 5*nrowsR),
                                          subplot_kw=dict(polar=True))
-        if nrows*ncols == 1:
+        if nrowsR*ncolsR == 1:
             axesCreg = [axesCreg]
         else:
             axesCreg = axesCreg.flatten()
 
-        all_imps_r = [method_importances[outreg][r] for r in reg_method_names]
+        all_imps_r = [method_importances[outcome_col][r] for r in reg_method_names]
         global_max_r = np.max([np.max(a) for a in all_imps_r]) if all_imps_r else 1.0
         base_angles_r = np.linspace(0, 2*math.pi, len(all_imps_r[0]), endpoint=False).tolist()
 
         for i, r_name in enumerate(reg_method_names):
-            imps = method_importances[outreg][r_name]
+            imps = method_importances[outcome_col][r_name]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
             short_labels_for_plot = [f"F{k+1}" for k in sorted_idx]
@@ -479,7 +472,7 @@ def main():
             sub_angles += sub_angles[:1]
 
             ax_ = axesCreg[i]
-            the_color = outcome_colors.get(outreg, fallback_color)
+            the_color = outcome_colors.get(outcome_col, fallback_color)
             ax_.plot(sub_angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
             ax_.fill(sub_angles, rep_imps, alpha=0.25, color=the_color)
             ax_.set_theta_offset(math.pi/2)
@@ -489,72 +482,67 @@ def main():
             ax_.set_ylim(0, max(global_max_r, 0))
             ax_.set_title(r_name, fontsize=10)
 
-        for j in range(i+1, nrows*ncols):
+        for j in range(i+1, nrowsR*ncolsR):
             axesCreg[j].axis("off")
 
-        figCreg.suptitle(f"Radial Importances (Regression) - {outreg}", fontsize=14)
+        figCreg.suptitle(f"Radial Importances (Regression) - {outcome_col}", fontsize=14)
         legend_elems_r = []
-        the_color_r = outcome_colors.get(outreg, fallback_color)
-        line_r = plt.Line2D([0], [0], color=the_color_r, lw=2, label=outreg)
+        the_color_r = outcome_colors.get(outcome_col, fallback_color)
+        line_r = plt.Line2D([0],[0], color=the_color_r, lw=2, label=outcome_col)
         legend_elems_r.append(line_r)
         figCreg.legend(handles=legend_elems_r, loc="lower center", bbox_to_anchor=(0.5, -0.05))
         plt.tight_layout(rect=[0,0.05,1,1])
         figCreg.savefig(pdfC_reg_path)
         plt.close(figCreg)
 
-    # 4) One final F1 heatmap
-    print("\n[INFO] Generating unified F1 score heatmap across all outcomes & methods...")
-    f1_heatmap_path = os.path.join(output_dir, "f1_scores_heatmap.pdf")
-    plt.figure(figsize=(1.6*len(method_names), 1.3*len(classification_outcomes)))
-    # Only classification outcomes in F1
-    class_f1_df = f1_df.loc[classification_outcomes, method_names]
-    sns.heatmap(class_f1_df, annot=True, cmap='viridis', fmt=".2f")
-    plt.title("F1 Scores Heatmap (Outcomes vs. Methods)")
+    # 4) One final recall heatmap (only classification)
+    print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
+    recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
+    plt.figure(figsize=(1.5*len(method_names), 1.2*len(classification_outcomes)))
+    class_recall_df = recall_df.loc[classification_outcomes, method_names]
+    sns.heatmap(class_recall_df, annot=True, cmap='viridis', fmt=".2f")
+    plt.title("Recall Scores Heatmap (Classification Outcomes vs. Methods)")
     plt.xlabel("Methods")
     plt.ylabel("Outcomes")
     plt.tight_layout()
-    plt.savefig(f1_heatmap_path)
+    plt.savefig(recall_heatmap_path)
     plt.close()
 
-    # 5) NEW: pdfD => one heatmap per method, "inferno" colormap, features as columns, outcomes as rows
-    # We'll unify classifiers + regressors so we handle all methods in a single loop
-    # but only the outcomes that each method actually has in method_importances
-    all_methods = list(classifiers.keys()) + list(regressors.keys())  # if you want both
-    # Or just classifiers if you only want classification methods => but let's do both.
+    # 5) pdfD => one heatmap per method, "inferno" colormap
+    all_methods = list(classifiers.keys()) + list(regressors.keys())
 
-    # We need to pick a "max" feature dimension from the importances. We'll assume they're consistent or skip
     for method_name in all_methods:
-        # Gather all outcomes that have method_name
+        # gather all outcomes that have method_name
         applicable_outcomes = []
-        # figure out the max # of features
+        all_vals = []
         max_features = 0
-        for out_ in outcomes_to_predict:
+
+        for out_ in all_outcomes:
             if method_name in method_importances[out_]:
-                n_feat = len(method_importances[out_][method_name])
-                max_features = max(max_features, n_feat)
+                arr_ = method_importances[out_][method_name]
+                max_features = max(max_features, len(arr_))
+                all_vals.extend(arr_)
                 applicable_outcomes.append(out_)
 
         if not applicable_outcomes:
-            continue  # skip if no outcomes for that method
+            continue
 
-        # Build a 2D array: row = outcome, col = feature index
-        # We'll do a shape = (len(applicable_outcomes), max_features)
         mat = np.zeros((len(applicable_outcomes), max_features))
-        row_labels = []
+        row_labels = list(applicable_outcomes)
+
+        global_minD = min(all_vals) if all_vals else 0.0
+        global_maxD = max(all_vals) if all_vals else 1.0
+
         for i, out_ in enumerate(applicable_outcomes):
-            imps = method_importances[out_][method_name]
-            # if imps < max_features, pad with 0
-            # minimal approach
-            mat[i, :len(imps)] = imps
-            row_labels.append(out_)
+            arr_ = method_importances[out_][method_name]
+            mat[i, :len(arr_)] = arr_
 
-        # column labels
-        col_labels = [f"F{k+1}" for k in range(max_features)]
-
+        col_labels = [f"feature_{i}" for i in range(max_features)]
         pdfD_path = os.path.join(output_dir, f"pdfD_{method_name}.pdf")
         plt.figure(figsize=(1.2*max_features, 1.2*len(applicable_outcomes)))
         sns.heatmap(mat, annot=False, cmap='inferno',
-                    xticklabels=col_labels, yticklabels=row_labels)
+                    xticklabels=col_labels, yticklabels=row_labels,
+                    vmin=global_minD, vmax=global_maxD)
         plt.title(f"Inferno Heatmap - {method_name} (Importances)")
         plt.xlabel("Features")
         plt.ylabel("Outcomes")
@@ -563,14 +551,14 @@ def main():
         plt.close()
 
     print(f"\n[INFO] Done!\n"
-          f"For each outcome, we created:\n"
+          f"For each classification outcome, we created:\n"
           f"  1) pdfA_<outcome>.pdf => combined confusion matrices\n"
-          f"  2) pdfB_<outcome>.pdf => combined bar chart importances\n"
-          f"  3) pdfC_<outcome>.pdf => radial plot (colored for that outcome)\n"
-          f"For newborn_weight, separate regression is done.\n"
-          f"Finally, we produce 'pdfD_<method>.pdf' for each method => an inferno heatmap summarizing radial data.\n"
-          f"And a final 'f1_scores_heatmap.pdf' with macro-F1 across classification outcomes vs. methods.\n")
-
+          f"  2) pdfB_<outcome>.pdf => combined bar chart importances (height increased)\n"
+          f"  3) pdfC_<outcome>.pdf => radial plot\n"
+          f"For continuous outcomes, separate regression approach.\n"
+          f"We added 'MLP' as a new classifier.\n"
+          f"Finally, we produce 'pdfD_<method>.pdf' for each method => inferno heatmap with unified scale.\n"
+          f"And 'recall_scores_heatmap.pdf' with macro-Recall across classification outcomes vs. methods.\n")
 
 if __name__ == "__main__":
     main()

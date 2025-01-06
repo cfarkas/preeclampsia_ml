@@ -70,7 +70,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     accuracy_score,
-    recall_score,  # using recall
+    recall_score,
     classification_report,
     confusion_matrix,
     mean_squared_error,
@@ -149,10 +149,11 @@ def main():
     # 1) Load Data, create correlation matrix once
     data = pd.read_csv(input_csv, delimiter=';', index_col='id')
 
+    # CHANGED to 'magma' for darker color scheme
     corr_matrix = data.corr()
     plt.figure(figsize=(30, 24))
     ax = sns.heatmap(
-        corr_matrix, annot=True, cmap='seismic', fmt='.2f',
+        corr_matrix, annot=True, cmap='magma', fmt='.2f',
         annot_kws={"size":12}, linewidths=0.5, linecolor='white',
         cbar_kws={'shrink':0.5}, vmin=-1, vmax=1
     )
@@ -166,11 +167,10 @@ def main():
     plt.close()
 
     # We treat 'gestational_age_delivery' and 'newborn_weight' as continuous
-    # everything else is classification
     all_outcomes = [
-        "gestational_age_delivery",
-        "newborn_weight",
-        "preeclampsia_onset",
+        "gestational_age_delivery",  # continuous
+        "newborn_weight",            # continuous
+        "preeclampsia_onset",        # classification
         "delivery_type",
         "newborn_vital_status",
         "newborn_malformations",
@@ -180,19 +180,20 @@ def main():
     continuous_outcomes = ["gestational_age_delivery", "newborn_weight"]
     classification_outcomes = [o for o in all_outcomes if o not in continuous_outcomes]
 
+    # CHANGED the color dictionary to darker variants
     outcome_colors = {
-        'gestational_age_delivery': 'red',
-        'newborn_weight': 'green',
-        'preeclampsia_onset': 'navy',
-        'delivery_type': 'blue',
-        'newborn_vital_status': 'purple',
-        'newborn_malformations': 'orange',
-        'eclampsia_hellp': 'cyan',
-        'iugr': 'brown'
+        'gestational_age_delivery': 'darkred',
+        'newborn_weight': 'darkgreen',
+        'preeclampsia_onset': 'midnightblue',
+        'delivery_type': 'darkblue',
+        'newborn_vital_status': 'indigo',
+        'newborn_malformations': 'saddlebrown',
+        'eclampsia_hellp': 'teal',
+        'iugr': 'maroon'
     }
-    fallback_color = "gray"
+    fallback_color = "black"
 
-    # Classification with MLP added
+    # Classification
     classifiers = {
         "LogisticRegression": LogisticRegression(
             penalty=None, dual=False, random_state=15,
@@ -209,7 +210,7 @@ def main():
     }
     method_names = list(classifiers.keys())
 
-    # Regressors for continuous
+    # Regressors
     regressors = {
         "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
         "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=42)
@@ -220,9 +221,7 @@ def main():
     method_importances = {out: {} for out in all_outcomes}
     method_conf_matrices = {out: {} for out in classification_outcomes}
 
-    # ==============
-    # Classification
-    # ==============
+    # Classification loop
     for outcome_col in classification_outcomes:
         print(f"\n=== Classification for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
@@ -275,9 +274,7 @@ def main():
 
             method_importances[outcome_col][model_name] = importances
 
-    # ==========
-    # Regression
-    # ==========
+    # Regression loop
     for outcome_col in continuous_outcomes:
         print(f"\n=== Regression for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
@@ -318,14 +315,12 @@ def main():
 
             method_importances[outcome_col][regr_name] = importances
 
-    # 3) Generate combined confusion, permutation, radial for classification
+    # 3) Confusion, permutation, radial for classification
     classification_only = [o for o in classification_outcomes]
     for outcome_col in classification_only:
         # pdfA
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
         n_methods = len(method_names)
-
-        # UPDATED subplot logic to handle up to 9 methods
         if n_methods <= 4:
             nrows, ncols = 1, n_methods
         elif n_methods <= 6:
@@ -333,7 +328,7 @@ def main():
         elif n_methods <= 9:
             nrows, ncols = 3, 3
         else:
-            nrows, ncols = 3, 4  # or your preferred layout for 10+ methods
+            nrows, ncols = 3, 4
 
         figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 4*nrows))
         if nrows*ncols == 1:
@@ -344,7 +339,8 @@ def main():
         for i, method_name in enumerate(method_names):
             confm = method_conf_matrices[outcome_col][method_name]
             ax_ = axesA[i]
-            sns.heatmap(confm, annot=True, cmap='Blues', fmt='g', ax=ax_)
+            # CHANGED from 'Blues' to 'Greys'
+            sns.heatmap(confm, annot=True, cmap='Greys', fmt='g', ax=ax_)
             ax_.set_title(method_name, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")
@@ -357,10 +353,8 @@ def main():
         figA.savefig(pdfA_path)
         plt.close(figA)
 
-        # pdfB => bar chart with bigger height
+        # pdfB => bar chart
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
-
-        # same logic for # of methods
         if n_methods <= 4:
             nrowsB, ncolsB = 1, n_methods
         elif n_methods <= 6:
@@ -376,7 +370,6 @@ def main():
         else:
             axesB = axesB.flatten()
 
-        # get actual feat names
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
@@ -388,7 +381,8 @@ def main():
             sorted_idx = np.argsort(imps)[::-1]
             ax_ = axesB[i]
             feat_labels_temp = [feat_names[k] for k in sorted_idx]
-            ax_.barh(feat_labels_temp, imps[sorted_idx], color='skyblue')
+            # CHANGED 'skyblue' to 'steelblue' for a darker bar color
+            ax_.barh(feat_labels_temp, imps[sorted_idx], color='steelblue')
             ax_.invert_yaxis()
             ax_.set_title(method_name, fontsize=10)
             ax_.set_xlabel("Mean Decrease")
@@ -518,12 +512,13 @@ def main():
         figCreg.savefig(pdfC_reg_path)
         plt.close(figCreg)
 
-    # 4) Final recall heatmap (only classification)
+    # 4) Final recall heatmap (classification)
     print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
     recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names), 1.2*len(classification_outcomes)))
     class_recall_df = recall_df.loc[classification_outcomes, method_names]
-    sns.heatmap(class_recall_df, annot=True, cmap='viridis', fmt=".2f")
+    # CHANGED from 'viridis' to 'cividis' for a darker theme
+    sns.heatmap(class_recall_df, annot=True, cmap='cividis', fmt=".2f")
     plt.title("Recall Scores Heatmap (Classification Outcomes vs. Methods)")
     plt.xlabel("Methods")
     plt.ylabel("Outcomes")
@@ -531,7 +526,7 @@ def main():
     plt.savefig(recall_heatmap_path)
     plt.close()
 
-    # 5) pdfD => one heatmap per method, "inferno" colormap
+    # 5) pdfD => one heatmap per method, "inferno" colormap remains dark
     all_methods = list(classifiers.keys()) + list(regressors.keys())
 
     for method_name in all_methods:
@@ -564,6 +559,7 @@ def main():
         pdfD_path = os.path.join(output_dir, f"pdfD_{method_name}.pdf")
 
         plt.figure(figsize=(1.2*max_features, 1.2*len(applicable_outcomes)))
+        # 'inferno' is already a dark-themed colormap
         sns.heatmap(mat, annot=False, cmap='inferno',
                     xticklabels=col_labels, yticklabels=row_labels,
                     vmin=global_minD, vmax=global_maxD)
@@ -576,14 +572,12 @@ def main():
 
     print(f"\n[INFO] Done!\n"
           f"For each classification outcome, we created:\n"
-          f"  1) pdfA_<outcome>.pdf => combined confusion matrices\n"
-          f"  2) pdfB_<outcome>.pdf => combined bar chart importances (increased height)\n"
-          f"  3) pdfC_<outcome>.pdf => radial plot\n"
+          f"  1) pdfA_<outcome>.pdf => combined confusion matrices (dark 'Greys')\n"
+          f"  2) pdfB_<outcome>.pdf => combined bar chart importances (darker 'steelblue')\n"
+          f"  3) pdfC_<outcome>.pdf => radial plot (darker outcome colors)\n"
           f"For continuous outcomes, separate regression approach.\n"
-          f"We added 'MLP' as a new classifier.\n"
-          f"We also updated subplot logic so 7–9 methods => a 3×3 layout.\n"
           f"Finally, 'pdfD_<method>.pdf' => inferno heatmap with unified scale,\n"
-          f"and 'recall_scores_heatmap.pdf' for macro-Recall across classification outcomes vs. methods.\n")
+          f"And 'recall_scores_heatmap.pdf' with 'cividis' theme for recall across classification outcomes.\n")
 
 if __name__ == "__main__":
     main()

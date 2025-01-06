@@ -196,17 +196,17 @@ def main():
     # Classification
     classifiers = {
         "LogisticRegression": LogisticRegression(
-            penalty=None, dual=False, random_state=15,
+            penalty=None, dual=False, random_state=42,
             solver='newton-cholesky', max_iter=100
         ),
         "LinearDiscriminantAnalysis": LinearDiscriminantAnalysis(),
         "GaussianNB": GaussianNB(),
         "K-Nearest Neighbors": KNeighborsClassifier(n_neighbors=5, algorithm='auto'),
-        "Decision Tree": DecisionTreeClassifier(random_state=15),
-        "Random Forest": RandomForestClassifier(bootstrap=False, random_state=15),
-        "GradientBoosting": GradientBoostingClassifier(max_depth=5, random_state=15),
-        "SVM": SVC(probability=True, random_state=15),
-        "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=15)
+        "Decision Tree": DecisionTreeClassifier(random_state=42),
+        "Random Forest": RandomForestClassifier(bootstrap=False, random_state=42),
+        "GradientBoosting": GradientBoostingClassifier(max_depth=5, random_state=42),
+        "SVM": SVC(probability=True, random_state=42),
+        "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=42)
     }
     method_names = list(classifiers.keys())
 
@@ -240,11 +240,11 @@ def main():
 
         try:
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=15, stratify=y
+                X, y, test_size=0.2, random_state=42, stratify=y
             )
         except ValueError:
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=15
+                X, y, test_size=0.2, random_state=42
             )
 
         scaler = StandardScaler()
@@ -265,7 +265,7 @@ def main():
 
             try:
                 perm_res = permutation_importance(
-                    clf, X_test, y_test, n_repeats=5, random_state=15, n_jobs=-1
+                    clf, X_test, y_test, n_repeats=5, random_state=42, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
             except Exception as e:

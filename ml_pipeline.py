@@ -70,14 +70,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     accuracy_score,
-    recall_score,
+    recall_score,  # using recall
     classification_report,
     confusion_matrix,
     mean_squared_error,
     r2_score
 )
 
-# ADDED: MLPClassifier
+# MLP
 from sklearn.neural_network import MLPClassifier
 
 from sklearn.linear_model import LogisticRegression
@@ -165,12 +165,12 @@ def main():
     plt.savefig(corr_path, bbox_inches='tight')
     plt.close()
 
-    # 2) We consider 'gestational_age_delivery' AND 'newborn_weight' as continuous
-    #    We'll do classification for the rest, including 'preeclampsia_onset'.
+    # We treat 'gestational_age_delivery' and 'newborn_weight' as continuous
+    # everything else is classification
     all_outcomes = [
-        "gestational_age_delivery",  # continuous
-        "newborn_weight",            # continuous
-        "preeclampsia_onset",        # classification
+        "gestational_age_delivery",
+        "newborn_weight",
+        "preeclampsia_onset",
         "delivery_type",
         "newborn_vital_status",
         "newborn_malformations",
@@ -192,7 +192,7 @@ def main():
     }
     fallback_color = "gray"
 
-    # 3) Classification methods
+    # Classification with MLP added
     classifiers = {
         "LogisticRegression": LogisticRegression(
             penalty=None, dual=False, random_state=15,
@@ -205,7 +205,6 @@ def main():
         "Random Forest": RandomForestClassifier(bootstrap=False, random_state=15),
         "GradientBoosting": GradientBoostingClassifier(max_depth=5, random_state=15),
         "SVM": SVC(probability=True, random_state=15),
-        # ADDED MLP
         "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=15)
     }
     method_names = list(classifiers.keys())
@@ -221,7 +220,9 @@ def main():
     method_importances = {out: {} for out in all_outcomes}
     method_conf_matrices = {out: {} for out in classification_outcomes}
 
-    # Classification loop
+    # ==============
+    # Classification
+    # ==============
     for outcome_col in classification_outcomes:
         print(f"\n=== Classification for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
@@ -257,7 +258,6 @@ def main():
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
-            # Use recall
             rec_ = recall_score(y_test, y_pred, average='macro')
             recall_df.loc[outcome_col, model_name] = rec_
 
@@ -270,12 +270,14 @@ def main():
                 )
                 importances = perm_res.importances_mean
             except Exception as e:
-                print(f"[WARN] Permutation importance failed for {model_name}/{outcome_col}: {e}")
+                print(f"[WARN] Perm. importance failed for {model_name}/{outcome_col}: {e}")
                 importances = np.zeros(len(feat_names))
 
             method_importances[outcome_col][model_name] = importances
 
-    # Regression loop
+    # ==========
+    # Regression
+    # ==========
     for outcome_col in continuous_outcomes:
         print(f"\n=== Regression for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
@@ -316,18 +318,22 @@ def main():
 
             method_importances[outcome_col][regr_name] = importances
 
-    # 3) Generate combined confusion, permutation, radial
+    # 3) Generate combined confusion, permutation, radial for classification
     classification_only = [o for o in classification_outcomes]
     for outcome_col in classification_only:
         # pdfA
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
         n_methods = len(method_names)
+
+        # UPDATED subplot logic to handle up to 9 methods
         if n_methods <= 4:
             nrows, ncols = 1, n_methods
         elif n_methods <= 6:
             nrows, ncols = 2, 3
+        elif n_methods <= 9:
+            nrows, ncols = 3, 3
         else:
-            nrows, ncols = 2, 4
+            nrows, ncols = 3, 4  # or your preferred layout for 10+ methods
 
         figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 4*nrows))
         if nrows*ncols == 1:
@@ -351,15 +357,26 @@ def main():
         figA.savefig(pdfA_path)
         plt.close(figA)
 
-        # pdfB => bar charts, but now we increase the figure's HEIGHT
+        # pdfB => bar chart with bigger height
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
-        nrowsB, ncolsB = nrows, ncols
-        figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))  # <== increased height
+
+        # same logic for # of methods
+        if n_methods <= 4:
+            nrowsB, ncolsB = 1, n_methods
+        elif n_methods <= 6:
+            nrowsB, ncolsB = 2, 3
+        elif n_methods <= 9:
+            nrowsB, ncolsB = 3, 3
+        else:
+            nrowsB, ncolsB = 3, 4
+
+        figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))
         if nrowsB*ncolsB == 1:
             axesB = [axesB]
         else:
             axesB = axesB.flatten()
 
+        # get actual feat names
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
@@ -390,8 +407,10 @@ def main():
             nrowsC, ncolsC = 1, n_methods
         elif n_methods <= 6:
             nrowsC, ncolsC = 2, 3
+        elif n_methods <= 9:
+            nrowsC, ncolsC = 3, 3
         else:
-            nrowsC, ncolsC = 2, 4
+            nrowsC, ncolsC = 3, 4
 
         figC, axesC = plt.subplots(nrows=nrowsC, ncols=ncolsC,
                                    figsize=(6*ncolsC, 5*nrowsC),
@@ -432,22 +451,26 @@ def main():
         figC.suptitle(f"Radial Importances (Unified Scale) - {outcome_col}", fontsize=14)
         legend_elems = []
         the_color = outcome_colors.get(outcome_col, fallback_color)
-        line = plt.Line2D([0], [0], color=the_color, lw=2, label=outcome_col)
+        line = plt.Line2D([0],[0], color=the_color, lw=2, label=outcome_col)
         legend_elems.append(line)
         figC.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, -0.05))
         plt.tight_layout(rect=[0,0.05,1,1])
         figC.savefig(pdfC_path)
         plt.close(figC)
 
-    # If continuous, do radial for reg
+    # For continuous: radial for regression
     for outcome_col in continuous_outcomes:
         reg_method_names = list(regressors.keys())
         pdfC_reg_path = os.path.join(output_dir, f"pdfC_{outcome_col}_regression.pdf")
 
         if len(reg_method_names) <= 4:
             nrowsR, ncolsR = 1, len(reg_method_names)
+        elif len(reg_method_names) <= 6:
+            nrowsR, ncolsR = 2, 3
+        elif len(reg_method_names) <= 9:
+            nrowsR, ncolsR = 3, 3
         else:
-            nrowsR, ncolsR = 2, 2
+            nrowsR, ncolsR = 3, 4
 
         figCreg, axesCreg = plt.subplots(nrows=nrowsR, ncols=ncolsR,
                                          figsize=(6*ncolsR, 5*nrowsR),
@@ -495,7 +518,7 @@ def main():
         figCreg.savefig(pdfC_reg_path)
         plt.close(figCreg)
 
-    # 4) One final recall heatmap (only classification)
+    # 4) Final recall heatmap (only classification)
     print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
     recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names), 1.2*len(classification_outcomes)))
@@ -539,6 +562,7 @@ def main():
 
         col_labels = [f"feature_{i}" for i in range(max_features)]
         pdfD_path = os.path.join(output_dir, f"pdfD_{method_name}.pdf")
+
         plt.figure(figsize=(1.2*max_features, 1.2*len(applicable_outcomes)))
         sns.heatmap(mat, annot=False, cmap='inferno',
                     xticklabels=col_labels, yticklabels=row_labels,
@@ -553,12 +577,13 @@ def main():
     print(f"\n[INFO] Done!\n"
           f"For each classification outcome, we created:\n"
           f"  1) pdfA_<outcome>.pdf => combined confusion matrices\n"
-          f"  2) pdfB_<outcome>.pdf => combined bar chart importances (height increased)\n"
+          f"  2) pdfB_<outcome>.pdf => combined bar chart importances (increased height)\n"
           f"  3) pdfC_<outcome>.pdf => radial plot\n"
           f"For continuous outcomes, separate regression approach.\n"
           f"We added 'MLP' as a new classifier.\n"
-          f"Finally, we produce 'pdfD_<method>.pdf' for each method => inferno heatmap with unified scale.\n"
-          f"And 'recall_scores_heatmap.pdf' with macro-Recall across classification outcomes vs. methods.\n")
+          f"We also updated subplot logic so 7–9 methods => a 3×3 layout.\n"
+          f"Finally, 'pdfD_<method>.pdf' => inferno heatmap with unified scale,\n"
+          f"and 'recall_scores_heatmap.pdf' for macro-Recall across classification outcomes vs. methods.\n")
 
 if __name__ == "__main__":
     main()

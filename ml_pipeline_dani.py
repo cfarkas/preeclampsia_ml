@@ -70,7 +70,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     accuracy_score,
-    recall_score,
+    f1_score,
     classification_report,
     confusion_matrix,
     mean_squared_error,
@@ -226,8 +226,8 @@ def main():
         "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=42)
     }
 
-    # We'll store recall for classification
-    recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names)
+    # We'll store f1 for classification
+    f1_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names)
     # Also store MSE, R2, RMSE, MAE for continuous
     regression_metrics = {}
 
@@ -269,8 +269,8 @@ def main():
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
-            rec_ = recall_score(y_test, y_pred, average='macro')
-            recall_df.loc[outcome_col, model_name] = rec_
+            rec_ = f1_score(y_test, y_pred, average='macro')
+            f1_df.loc[outcome_col, model_name] = rec_
 
             conf_ = confusion_matrix(y_test, y_pred)
             method_conf_matrices[outcome_col][model_name] = conf_
@@ -511,18 +511,18 @@ def main():
         plt.close(figCreg)
 
     ########################
-    # 6) Final recall heatmap for classification
+    # 6) Final f1 heatmap for classification
     ########################
-    print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
-    recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
+    print("\n[INFO] Generating unified f1 score heatmap across classification outcomes & methods...")
+    f1_heatmap_path = os.path.join(output_dir, "f1_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names), 1.2*len(classification_outcomes)))
-    class_recall_df = recall_df.loc[classification_outcomes, method_names]
-    sns.heatmap(class_recall_df, annot=True, cmap='cividis', fmt=".2f")
-    plt.title("Recall Scores Heatmap (Classification Outcomes vs. Methods)")
+    class_f1_df = f1_df.loc[classification_outcomes, method_names]
+    sns.heatmap(class_f1_df, annot=True, cmap='cividis', fmt=".2f")
+    plt.title("f1 Scores Heatmap (Classification Outcomes vs. Methods)")
     plt.xlabel("Methods")
     plt.ylabel("Outcomes")
     plt.tight_layout()
-    plt.savefig(recall_heatmap_path)
+    plt.savefig(f1_heatmap_path)
     plt.close()
 
     ########################
@@ -594,15 +594,15 @@ def main():
     # We'll store a dictionary of subset features for each outcome
     best_features_dict = {}
 
-    # (a) For classification outcomes: pick the method with highest recall
+    # (a) For classification outcomes: pick the method with highest f1
     # (b) For continuous outcomes: pick method with best (lowest MSE or highest R2).
     for outcome_col in classification_outcomes:
         best_method = None
-        best_recall = -1.0
+        best_f1 = -1.0
         for m_ in classifiers.keys():
-            val = recall_df.loc[outcome_col, m_]
-            if val > best_recall:
-                best_recall = val
+            val = f1_df.loc[outcome_col, m_]
+            if val > best_f1:
+                best_f1 = val
                 best_method = m_
         imps = method_importances[outcome_col][best_method]
         Xtemp = data.drop(columns=[outcome_col])
@@ -774,7 +774,7 @@ def main():
         best_method = None
         best_val = -1
         for m_ in classifiers.keys():
-            val = recall_df.loc[outcome_col, m_]
+            val = f1_df.loc[outcome_col, m_]
             if val > best_val:
                 best_val = val
                 best_method = m_

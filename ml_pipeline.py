@@ -360,7 +360,8 @@ def main():
         for i, model_name in enumerate(method_names):
             confm = method_conf_matrices[outcome_col][model_name]
             ax_ = axesA[i]
-            sns.heatmap(confm, annot=True, cmap=darkblue_cmap, fmt='g', ax=ax_)
+            darkred_cmap = sns.color_palette("dark:red", as_cmap=True)
+            sns.heatmap(confm, annot=True, cmap=darkred_cmap, fmt='g', ax=ax_)
             ax_.set_title(model_name, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")

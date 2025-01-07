@@ -194,10 +194,6 @@ def main():
     from matplotlib.colors import ListedColormap
     darkblue_cmap = sns.color_palette("dark:blue", as_cmap=True)
 
-    # The rest (radial plots, bar charts) remain as is
-    # We'll do bar chart color "skyblue" or "steelblue"? 
-    # The user said "leave radial, permutation as is"? So let's keep them as is from your original version.
-
     outcome_colors = {
         'gestational_age_delivery': 'darkred',
         'newborn_weight': 'darkgreen',
@@ -233,7 +229,7 @@ def main():
     # We'll store recall for classification
     recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names)
     # Also store MSE, R2, RMSE, MAE for continuous
-    regression_metrics = {}  # regression_metrics[outcome][method] = (mse, r2, rmse, mae)
+    regression_metrics = {}
 
     method_importances = {out: {} for out in all_outcomes}
     method_conf_matrices = {out: {} for out in classification_outcomes}
@@ -253,9 +249,6 @@ def main():
         for c in X.columns:
             if X[c].dtype == 'object':
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
-
-        if y.dtype == 'object':
-            y = LabelEncoder().fit_transform(y.astype(str))
 
         try:
             X_train, X_test, y_train, y_test = train_test_split(
@@ -315,7 +308,6 @@ def main():
         X_test = scaler.transform(X_test)
         feat_names = np.array(X.columns)
 
-        # store metrics in a small dict
         regression_metrics[outcome_col] = {}
 
         for regr_name, regr in regressors.items():
@@ -327,7 +319,6 @@ def main():
             rmse_val = math.sqrt(mse_val)
             mae_val = mean_absolute_error(y_test, y_pred)
             r2_val = r2_score(y_test, y_pred)
-
             regression_metrics[outcome_col][regr_name] = (mse_val, rmse_val, mae_val, r2_val)
             print(f"    MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}")
 
@@ -343,10 +334,8 @@ def main():
             method_importances[outcome_col][regr_name] = importances
 
     ########################
-    # 4) Create subplots for classification (Conf Mat, Bar Chart, Radial)
+    # 4) Classification Plots
     ########################
-    classification_only = [o for o in classification_outcomes]
-    # We define a helper function for deciding subplot nrows,ncols
     def decide_layout(n_methods):
         if n_methods <= 4:
             return (1, n_methods)
@@ -357,7 +346,7 @@ def main():
         else:
             return (3, 4)
 
-    for outcome_col in classification_only:
+    for outcome_col in classification_outcomes:
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
         n_methods = len(method_names)
         nrows, ncols = decide_layout(n_methods)
@@ -368,12 +357,9 @@ def main():
         else:
             axesA = axesA.flatten()
 
-        # Plot confusion
         for i, model_name in enumerate(method_names):
             confm = method_conf_matrices[outcome_col][model_name]
             ax_ = axesA[i]
-            # Use a "darkblue" palette
-            darkblue_cmap = sns.color_palette("dark:blue", as_cmap=True)
             sns.heatmap(confm, annot=True, cmap=darkblue_cmap, fmt='g', ax=ax_)
             ax_.set_title(model_name, fontsize=10)
             ax_.set_xlabel("Predicted")
@@ -387,7 +373,6 @@ def main():
         figA.savefig(pdfA_path)
         plt.close(figA)
 
-        # pdfB => bar chart
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
         nrowsB, ncolsB = decide_layout(n_methods)
         figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))
@@ -396,7 +381,6 @@ def main():
         else:
             axesB = axesB.flatten()
 
-        # gather feature names
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
@@ -421,7 +405,6 @@ def main():
         figB.savefig(pdfB_path)
         plt.close(figB)
 
-        # pdfC => radial
         pdfC_path = os.path.join(output_dir, f"pdfC_{outcome_col}.pdf")
         nrowsC, ncolsC = decide_layout(n_methods)
         figC, axesC = plt.subplots(nrows=nrowsC, ncols=ncolsC,
@@ -497,16 +480,18 @@ def main():
             short_labels_for_plot = [f"F{k+1}" for k in sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            sub_angles = base_angles_r[:]
-            sub_angles += sub_angles_r[:1]
+
+            # FIX HERE: define sub_angles_r properly
+            sub_angles_r = base_angles_r[:]
+            sub_angles_r += sub_angles_r[:1]
 
             ax_ = axesCreg[i]
             the_color = outcome_colors.get(outcome_col, fallback_color)
-            ax_.plot(sub_angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
-            ax_.fill(sub_angles, rep_imps, alpha=0.25, color=the_color)
+            ax_.plot(sub_angles_r, rep_imps, linewidth=2, linestyle='solid', color=the_color)
+            ax_.fill(sub_angles_r, rep_imps, alpha=0.25, color=the_color)
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
-            degs = np.degrees(sub_angles[:-1])
+            degs = np.degrees(sub_angles_r[:-1])
             ax_.set_thetagrids(degs, labels=short_labels_for_plot, fontsize=6)
             ax_.set_ylim(0, max(global_max_r, 0))
             ax_.set_title(r_name, fontsize=10)
@@ -610,9 +595,7 @@ def main():
 
     # (a) For classification outcomes: pick the method with highest recall
     # (b) For continuous outcomes: pick method with best (lowest MSE or highest R2).
-    # Then get topN from method_importances[outcome][that_method].
     for outcome_col in classification_outcomes:
-        # find best recall
         best_method = None
         best_recall = -1.0
         for m_ in classifiers.keys():
@@ -620,66 +603,56 @@ def main():
             if val > best_recall:
                 best_recall = val
                 best_method = m_
-        # now get the topN from method_importances
         imps = method_importances[outcome_col][best_method]
-        # we need the feature names. Let's replicate the logic from pdfB
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
                 Xtemp = Xtemp.drop(columns=[o_])
         feat_names = np.array(Xtemp.columns)
-
         sorted_idx = np.argsort(imps)[::-1]
         top_idx = sorted_idx[:topN]
         best_feat_names = feat_names[top_idx]
         best_features_dict[outcome_col] = best_feat_names.tolist()
 
-    for outcome_col in continuous_outcomes:
-        # find best by MSE or R2. Let's do best by MSE
+    def get_best_mse_method(outcome_col):
         best_method = None
-        best_mse = 1e15  # big number
+        best_mse = 1e15
         for m_ in regressors.keys():
-            if m_ in regression_metrics[outcome_col]:
+            if outcome_col in regression_metrics and m_ in regression_metrics[outcome_col]:
                 (mse_val, rmse_val, mae_val, r2_val) = regression_metrics[outcome_col][m_]
                 if mse_val < best_mse:
                     best_mse = mse_val
                     best_method = m_
-        # now get topN from method_importances
+        return best_method
+
+    for outcome_col in continuous_outcomes:
+        best_method = get_best_mse_method(outcome_col)
         imps = method_importances[outcome_col][best_method]
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
                 Xtemp = Xtemp.drop(columns=[o_])
         feat_names = np.array(Xtemp.columns)
-
         sorted_idx = np.argsort(imps)[::-1]
         top_idx = sorted_idx[:topN]
         best_feat_names = feat_names[top_idx]
         best_features_dict[outcome_col] = best_feat_names.tolist()
 
-    # Now we re-run a pipeline on those top features for each outcome
-    # We'll define a small function to do "retrain_on_subset" for each outcome
     def retrain_on_subset(outcome_col, top_features, out_folder):
-        # build a new smaller dataframe with those top features + outcome
-        # from the original data
         subset_cols = list(top_features) + [outcome_col]
         subset_data = data[subset_cols].copy()
-        # Then we do the same logic as above but store PDFs in out_folder
-        # For classification vs regression. We'll do a minimal approach:
-        # This is essentially a small pipeline. We'll just do classification or regression once.
-        
-        # check if outcome is classification or continuous
         is_continuous = outcome_col in continuous_outcomes
         
         X = subset_data.drop(columns=[outcome_col])
         y = subset_data[outcome_col].copy()
         
-        # encode
         for c in X.columns:
             if X[c].dtype == 'object':
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
         
-        # do normal train_test
+        from matplotlib.colors import ListedColormap
+        darkblue_cmap = sns.color_palette("dark:blue", as_cmap=True)
+
         try:
             if not is_continuous:
                 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
@@ -695,12 +668,6 @@ def main():
         X_test = sca.transform(X_test)
         
         if not is_continuous:
-            # classification
-            # we'll just do a small run: pick each classifier, compute recall, confusion matrix
-            # store in PDFs inside out_folder
-            from matplotlib.colors import ListedColormap
-            darkblue_cmap = sns.color_palette("dark:blue", as_cmap=True)
-
             pdfA_path = os.path.join(out_folder, f"subset_pdfA_{outcome_col}.pdf")
             n_methods = len(classifiers)
             nrows, ncols = decide_layout(n_methods)
@@ -732,7 +699,6 @@ def main():
             plt.close(figA)
             
         else:
-            # regression
             pdfC_reg_path = os.path.join(out_folder, f"subset_pdfC_{outcome_col}_regression.pdf")
             n_methods = len(regressors)
             nrowsR, ncolsR = decide_layout(n_methods)
@@ -760,7 +726,6 @@ def main():
                 global_max_r = 1.0
             base_angles_r = np.linspace(0, 2*math.pi, len(all_imps_list[0]), endpoint=False).tolist()
             
-            # re-run the loop to plot
             for m_ in regressors.keys():
                 regr = regressors[m_]
                 regr.fit(X_train, y_train)
@@ -772,16 +737,16 @@ def main():
                 short_labels_for_plot = [f"F{k+1}" for k in sorted_idx]
                 
                 rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-                sub_angles = base_angles_r[:]
-                sub_angles += sub_angles[:1]
+                sub_angles_r = base_angles_r[:]
+                sub_angles_r += sub_angles_r[:1]
                 
                 ax_ = axesCreg[idx_]
                 the_color_r = 'darkgreen'
-                ax_.plot(sub_angles, rep_imps, linewidth=2, linestyle='solid', color=the_color_r)
-                ax_.fill(sub_angles, rep_imps, alpha=0.25, color=the_color_r)
+                ax_.plot(sub_angles_r, rep_imps, linewidth=2, linestyle='solid', color=the_color_r)
+                ax_.fill(sub_angles_r, rep_imps, alpha=0.25, color=the_color_r)
                 ax_.set_theta_offset(math.pi/2)
                 ax_.set_theta_direction(-1)
-                degs = np.degrees(sub_angles[:-1])
+                degs = np.degrees(sub_angles_r[:-1])
                 ax_.set_thetagrids(degs, labels=short_labels_for_plot, fontsize=6)
                 ax_.set_ylim(0, max(global_max_r, 0))
                 ax_.set_title(m_, fontsize=10)
@@ -795,24 +760,15 @@ def main():
             figCreg.savefig(pdfC_reg_path)
             plt.close(figCreg)
     
-    # Now do the actual SUBSET pipeline
     subset_outdir = os.path.join(output_dir, "subset")
     os.makedirs(subset_outdir, exist_ok=True)
     
-    # for each outcome, we retrain on the top 5 features
     for outcome_col in all_outcomes:
         if outcome_col in method_importances:
-            # we have best_features from the code that picked them:
-            # Actually we must define them. Let's do:
-            # We'll pick the best method we used above. For classification => best recall
-            # For continuous => best MSE. This was done but let's store them in a dictionary
-            # We'll do that logic now:
             pass
     
-    # Actually let's define a dictionary "best_features_dict" up front
     best_features_dict = {}
     
-    # For classification: pick the method with highest recall
     for outcome_col in classification_outcomes:
         best_method = None
         best_val = -1
@@ -821,9 +777,7 @@ def main():
             if val > best_val:
                 best_val = val
                 best_method = m_
-        # get topN
         if best_method:
-            # need the feature names
             Xtemp = data.drop(columns=[outcome_col])
             for o_ in all_outcomes:
                 if o_ != outcome_col and o_ in Xtemp.columns:
@@ -835,10 +789,7 @@ def main():
             best_features = feat_names[top_idx].tolist()
             best_features_dict[outcome_col] = best_features
     
-    # For continuous: pick the method with best MSE
-    # We need a small function to find best MSE from regression_metrics
     def get_best_mse_method(outcome_col):
-        # regression_metrics[outcome][method] = (mse, rmse, mae, r2)
         best_method = None
         best_mse = 1e15
         for m_ in regressors.keys():
@@ -863,7 +814,6 @@ def main():
             best_features = feat_names[top_idx].tolist()
             best_features_dict[outcome_col] = best_features
     
-    # Now we actually do retrain_on_subset for each outcome with best_features
     for outcome_col in all_outcomes:
         if outcome_col in best_features_dict:
             subfolder = os.path.join(subset_outdir, outcome_col)

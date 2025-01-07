@@ -657,12 +657,12 @@ def main():
         try:
             if not is_continuous:
                 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
-                                                                    random_state=999, stratify=y)
+                                                                    random_state=42, stratify=y)
             else:
                 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, 
-                                                                    random_state=999)
+                                                                    random_state=42)
         except ValueError:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=999)
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
         sca = StandardScaler()
         X_train = sca.fit_transform(X_train)
@@ -717,7 +717,7 @@ def main():
                 regr = regressors[m_]
                 regr.fit(X_train, y_train)
                 perm_res = permutation_importance(regr, X_test, y_test, n_repeats=5,
-                                                  random_state=999, n_jobs=-1)
+                                                  random_state=42, n_jobs=-1)
                 imps = perm_res.importances_mean
                 all_imps_list.append(imps)
             
@@ -731,7 +731,7 @@ def main():
                 regr = regressors[m_]
                 regr.fit(X_train, y_train)
                 perm_res = permutation_importance(regr, X_test, y_test, n_repeats=5,
-                                                  random_state=999, n_jobs=-1)
+                                                  random_state=42, n_jobs=-1)
                 imps = perm_res.importances_mean
                 sorted_idx = np.argsort(imps)[::-1]
                 sorted_imps = imps[sorted_idx]

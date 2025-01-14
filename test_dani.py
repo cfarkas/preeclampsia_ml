@@ -8,7 +8,7 @@ import sys
 import subprocess
 import os
 
-ENV_NAME = "ml_preeclampsia"
+ENV_NAME = "test_dani"
 
 def conda_env_exists(env_name=ENV_NAME):
     try:
@@ -107,7 +107,7 @@ def parse_arguments():
     parser.add_argument(
         "--install_conda",
         action="store_true",
-        help="If set, create/check the ml_preeclampsia environment, then re-invoke script inside it."
+        help="If set, create/check the test_dani environment, then re-invoke script inside it."
     )
     parser.add_argument(
         "--input",

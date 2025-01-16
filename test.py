@@ -327,15 +327,17 @@ def main():
         else:
             axesA = axesA.flatten()
 
-        # Use "plasma"
-        plasma_cmap = plt.get_cmap("plasma")
+        # CHANGED: Instead of 'plasma', use white->darkblue (plt.cm.Blues)
+        # plasma_cmap = plt.get_cmap("plasma")
+        white_to_darkblue = plt.cm.Blues  # from white to dark blue
 
         i_ = 0
         for m_ in method_names_cls:
             conf_ = method_conf_matrices[outcome_col][m_]
             ax_ = axesA[i_]
             i_ += 1
-            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=plasma_cmap)
+            # sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=plasma_cmap)
+            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=white_to_darkblue)  # changed
             ax_.set_title(m_, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")
@@ -398,7 +400,6 @@ def main():
         else:
             axesC = axesC.flatten()
 
-        # compute base angles
         Xtemp2 = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp2.columns:
@@ -420,8 +421,9 @@ def main():
 
             ax_ = axesC[i_]
             i_ += 1
-            ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color='gray')
-            ax_.fill(angles, rep_imps, alpha=0.25, color='gray')
+            # CHANGED: color='darkviolet' instead of 'gray'
+            ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color='darkviolet')
+            ax_.fill(angles, rep_imps, alpha=0.25, color='darkviolet')
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
             ax_.set_ylim(0, max(0, max(rep_imps)))
@@ -475,8 +477,9 @@ def main():
 
             ax_ = axesCreg[i_]
             i_ += 1
-            ax_.plot(angles_r, rep_imps, linewidth=2, linestyle='solid', color='gray')
-            ax_.fill(angles_r, rep_imps, alpha=0.25, color='gray')
+            # CHANGED: color='darkviolet' instead of 'gray'
+            ax_.plot(angles_r, rep_imps, linewidth=2, linestyle='solid', color='darkviolet')
+            ax_.fill(angles_r, rep_imps, alpha=0.25, color='darkviolet')
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
             ax_.set_ylim(0, max(0, max(rep_imps)))
@@ -552,7 +555,7 @@ def main():
         plt.xlabel("Features")
         plt.ylabel("Outcomes")
         plt.tight_layout()
-        plt.savefig(pdfD_path, bbox_inches='tight')  # ensure labels not cut
+        plt.savefig(pdfD_path, bbox_inches='tight')
         plt.close()
 
     ########################
@@ -574,9 +577,6 @@ def main():
     ########################
     # Subset CSV: pick best method for each outcome, get top features, unify
     ########################
-    # We'll define a simple approach: pick the method with best recall (classification) or lowest MSE (regression).
-    # Then pick features above some cutoff, unify them, and produce a CSV.
-
     def pick_best_method_classification(outcome):
         best_m = None
         best_score = -999
@@ -588,7 +588,6 @@ def main():
         return best_m
 
     def pick_best_method_regression(outcome):
-        # We'll find minimal MSE
         best_m = None
         best_mse = float('inf')
         if outcome in regression_metrics:
@@ -606,8 +605,6 @@ def main():
     for out_ in classification_outcomes:
         bm_ = pick_best_method_classification(out_)
         if bm_:
-            # gather importances
-            # define the X for that outcome
             Xtemp_ = data.drop(columns=[out_], errors='ignore')
             for xo in all_outcomes:
                 if xo != out_ and xo in Xtemp_.columns:
@@ -616,7 +613,6 @@ def main():
             imps_ = method_importances[out_][bm_]
             mask = (imps_ > top_cutoff)
             if not np.any(mask):
-                # fallback to single best
                 top_idx = [np.argmax(imps_)]
             else:
                 top_idx = np.where(mask)[0]
@@ -640,17 +636,13 @@ def main():
             for idx_ in top_idx:
                 best_feat_union.add(feats_[idx_])
 
-    # union of best features + original outcomes
     final_subset_cols = list(best_feat_union) + all_outcomes
-    final_subset_cols = list(dict.fromkeys(final_subset_cols))  # remove duplicates, keep order
+    final_subset_cols = list(dict.fromkeys(final_subset_cols))
 
     final_subset_df = data[final_subset_cols].copy()
     subset_csv_path = os.path.join(output_dir, "best_features_overall_subset.csv")
     final_subset_df.to_csv(subset_csv_path, sep=';', index=True)
 
-    ########################
-    # Finally, recall heatmap for classification
-    ########################
     print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
     recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names_cls), 1.2*len(classification_outcomes)))
@@ -663,8 +655,7 @@ def main():
     plt.savefig(recall_heatmap_path)
     plt.close()
 
-    print("\n[INFO] Done! Confusion matrix color changed to 'plasma', radial plots labeled with actual features,")
-    print("[INFO] recall heatmap reintroduced, pdfD expanded with bbox_inches='tight', and best_features_overall_subset.csv produced.\n")
+    print("\n[INFO] Done! Confusion matrix color changed to white->darkblue (Blues), radial plots colored darkviolet.\n")
 
 if __name__ == "__main__":
     main()

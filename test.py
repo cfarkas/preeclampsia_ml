@@ -655,7 +655,7 @@ def main():
     plt.savefig(recall_heatmap_path)
     plt.close()
 
-    print("\n[INFO] Done! Confusion matrix color changed to white->darkblue (Blues), radial plots colored darkviolet.\n")
+    print("\n[INFO] Done! Confusion matrix colored white->darkblue (Blues), radial plots colored darkviolet.\n")
 
 if __name__ == "__main__":
     main()

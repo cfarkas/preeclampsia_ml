@@ -69,16 +69,12 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
-    accuracy_score,
     recall_score,
-    classification_report,
     confusion_matrix,
     mean_squared_error,
-    r2_score
+    r2_score,
+    mean_absolute_error
 )
-
-# For MAE
-from sklearn.metrics import mean_absolute_error
 
 # MLP
 from sklearn.neural_network import MLPClassifier
@@ -96,6 +92,7 @@ from sklearn.ensemble import (
 )
 from sklearn.svm import SVC
 from sklearn.inspection import permutation_importance
+
 
 ###############################################################################
 # Argument Parsing
@@ -123,6 +120,34 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+###############################################################################
+# Minimal "repel" approach for radial
+###############################################################################
+def repel_labels(ax, angles, labels):
+    """
+    Attempt to offset overlapping labels (a minimal approach).
+    We'll check distances in angle space & offset them slightly if they are too close.
+    This is not a perfect approach but a demonstration of a minimal "repel."
+    """
+    if len(labels) < 2:
+        return
+    # angles are len(...) = len(labels). We'll store new angles in array:
+    new_angles = angles[:]
+    offset = 0.03  # small offset in radians
+    for i in range(len(labels)):
+        for j in range(i+1, len(labels)):
+            if abs(new_angles[i] - new_angles[j]) < offset/2:
+                # push one label slightly
+                new_angles[j] += offset
+    # Now we place them manually
+    for i, lbl in enumerate(labels):
+        # We convert angle to x,y
+        ang = new_angles[i]
+        x = 1.05 * math.cos(ang)  # radius slightly >1
+        y = 1.05 * math.sin(ang)
+        ax.text( x, y, lbl, fontsize=6, ha='center', va='center',
+                 rotation=math.degrees(ang - math.pi/2))
+
 def main():
     args = parse_arguments()
 
@@ -149,19 +174,15 @@ def main():
     output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
 
-    ########################
     # 1) Load Data
-    ########################
     data = pd.read_csv(input_csv, delimiter=';', index_col='id')
 
-    # Re-enable previous colors on the FULL correlation matrix: "seismic"
+    # correlation matrix (with 'seismic')
     corr_matrix = data.corr()
     plt.figure(figsize=(30, 24))
-    ax = sns.heatmap(
-        corr_matrix, annot=True, cmap='seismic', fmt='.2f',
-        annot_kws={"size":12}, linewidths=0.5, linecolor='white',
-        cbar_kws={'shrink':0.5}, vmin=-1, vmax=1
-    )
+    ax = sns.heatmap(corr_matrix, annot=True, cmap='seismic', fmt='.2f',
+                     annot_kws={"size":12}, linewidths=0.5, linecolor='white',
+                     cbar_kws={'shrink':0.5}, vmin=-1, vmax=1)
     cbar = ax.collections[0].colorbar
     cbar.ax.tick_params(labelsize=14)
     plt.xticks(rotation=90, ha='right', fontsize=14)
@@ -171,13 +192,11 @@ def main():
     plt.savefig(corr_path, bbox_inches='tight')
     plt.close()
 
-    ############################################
-    # Define Outcomes (Classification vs. Regression)
-    ############################################
+    # outcomes
     all_outcomes = [
-        "gestational_age_delivery",  # continuous
-        "newborn_weight",            # continuous
-        "preeclampsia_onset",        # classification
+        "gestational_age_delivery",
+        "newborn_weight",
+        "preeclampsia_onset",
         "delivery_type",
         "newborn_vital_status",
         "newborn_malformations",
@@ -187,25 +206,7 @@ def main():
     continuous_outcomes = ["gestational_age_delivery", "newborn_weight"]
     classification_outcomes = [o for o in all_outcomes if o not in continuous_outcomes]
 
-    ############################################
-    # Colors: revert confusion matrix to "darkblue"? 
-    ############################################
-    from matplotlib.colors import ListedColormap
-    darkblue_cmap = sns.color_palette("dark:blue", as_cmap=True)
-
-    outcome_colors = {
-        'gestational_age_delivery': 'darkred',
-        'newborn_weight': 'darkgreen',
-        'preeclampsia_onset': 'midnightblue',
-        'delivery_type': 'darkblue',
-        'newborn_vital_status': 'indigo',
-        'newborn_malformations': 'saddlebrown',
-        'eclampsia_hellp': 'teal',
-        'iugr': 'maroon'
-    }
-    fallback_color = "black"
-
-    # Classification
+    # classifiers
     classifiers = {
         "LogisticRegression": LogisticRegression(random_state=42, solver='newton-cholesky', max_iter=100),
         "LinearDiscriminantAnalysis": LinearDiscriminantAnalysis(),
@@ -219,26 +220,24 @@ def main():
     }
     method_names = list(classifiers.keys())
 
-    # Regressors
     regressors = {
         "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
         "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=42)
     }
 
-    # We'll store recall for classification
+    # store classification recall, regression metrics
     recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names)
-    # Also store MSE, R2, RMSE, MAE for continuous
     regression_metrics = {}
 
     method_importances = {out: {} for out in all_outcomes}
     method_conf_matrices = {out: {} for out in classification_outcomes}
 
-    ########################
-    # 2) Classification Loop
-    ########################
+    ############################
+    # Classification pipeline
+    ############################
     for outcome_col in classification_outcomes:
-        print(f"\n=== Classification for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
+        # remove other outcomes
         others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
             if o_ in X.columns:
@@ -258,38 +257,39 @@ def main():
                 X, y, test_size=0.2, random_state=42
             )
 
-        scaler = StandardScaler()
-        X_train = scaler.fit_transform(X_train)
-        X_test = scaler.transform(X_test)
+        sc = StandardScaler()
+        X_train = sc.fit_transform(X_train)
+        X_test = sc.transform(X_test)
         feat_names = np.array(X.columns)
 
-        for model_name, clf in classifiers.items():
-            print(f"  Training {model_name} for {outcome_col} ...")
+        for m_ in classifiers.keys():
+            clf = classifiers[m_]
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
+            # store recall
             rec_ = recall_score(y_test, y_pred, average='macro')
-            recall_df.loc[outcome_col, model_name] = rec_
+            recall_df.loc[outcome_col, m_] = rec_
 
+            # confusion
             conf_ = confusion_matrix(y_test, y_pred)
-            method_conf_matrices[outcome_col][model_name] = conf_
+            method_conf_matrices[outcome_col][m_] = conf_
 
+            # permutation
             try:
                 perm_res = permutation_importance(
                     clf, X_test, y_test, n_repeats=5, random_state=42, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
             except Exception as e:
-                print(f"[WARN] Permutation importance failed for {model_name}/{outcome_col}: {e}")
                 importances = np.zeros(len(feat_names))
 
-            method_importances[outcome_col][model_name] = importances
+            method_importances[outcome_col][m_] = importances
 
-    ########################
-    # 3) Regression Loop
-    ########################
+    ##########################
+    # Regression pipeline
+    ##########################
     for outcome_col in continuous_outcomes:
-        print(f"\n=== Regression for outcome: {outcome_col} ===")
         X = data.drop(columns=[outcome_col])
         others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
@@ -301,79 +301,85 @@ def main():
             if X[c].dtype == 'object':
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        scaler = StandardScaler()
-        X_train = scaler.fit_transform(X_train)
-        X_test = scaler.transform(X_test)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        sc = StandardScaler()
+        X_train = sc.fit_transform(X_train)
+        X_test = sc.transform(X_test)
         feat_names = np.array(X.columns)
 
         regression_metrics[outcome_col] = {}
 
-        for regr_name, regr in regressors.items():
-            print(f"  Training {regr_name} for {outcome_col} ...")
-            regr.fit(X_train, y_train)
-            y_pred = regr.predict(X_test)
+        for regr_ in regressors.keys():
+            model_ = regressors[regr_]
+            model_.fit(X_train, y_train)
+            y_pred = model_.predict(X_test)
 
             mse_val = mean_squared_error(y_test, y_pred)
             rmse_val = math.sqrt(mse_val)
             mae_val = mean_absolute_error(y_test, y_pred)
             r2_val = r2_score(y_test, y_pred)
-            regression_metrics[outcome_col][regr_name] = (mse_val, rmse_val, mae_val, r2_val)
-            print(f"    MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}")
+            regression_metrics[outcome_col][regr_] = (mse_val, rmse_val, mae_val, r2_val)
 
             try:
                 perm_res = permutation_importance(
-                    regr, X_test, y_test, n_repeats=5, random_state=42, n_jobs=-1
+                    model_, X_test, y_test, n_repeats=5, random_state=42, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
-            except Exception as e:
-                print(f"[WARN] Permutation importance failed for {regr_name}/{outcome_col}: {e}")
+            except:
                 importances = np.zeros(len(feat_names))
 
-            method_importances[outcome_col][regr_name] = importances
+            method_importances[outcome_col][regr_] = importances
 
-    ########################
-    # 4) Classification Plots
-    ########################
-    def decide_layout(n_methods):
-        if n_methods <= 4:
-            return (1, n_methods)
-        elif n_methods <= 6:
+    ##########################
+    # Confusion matrix plots (with default colors)
+    ##########################
+    def decide_layout(n):
+        if n <= 4:
+            return (1, n)
+        elif n <= 6:
             return (2, 3)
-        elif n_methods <= 9:
+        elif n <= 9:
             return (3, 3)
         else:
             return (3, 4)
 
     for outcome_col in classification_outcomes:
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
-        n_methods = len(method_names)
+        n_methods = len(classifiers)
         nrows, ncols = decide_layout(n_methods)
-
         figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 4*nrows))
         if nrows*ncols == 1:
             axesA = [axesA]
         else:
             axesA = axesA.flatten()
 
-        for i, model_name in enumerate(method_names):
-            confm = method_conf_matrices[outcome_col][model_name]
-            ax_ = axesA[i]
-            darkred_cmap = sns.color_palette("dark:red", as_cmap=True)  # example dark-red
-            sns.heatmap(confm, annot=True, cmap=darkred_cmap, fmt='g', ax=ax_)
-            ax_.set_title(model_name, fontsize=10)
+        i_ = 0
+        for m_ in classifiers.keys():
+            conf_ = method_conf_matrices[outcome_col][m_]
+            ax_ = axesA[i_]
+            i_ += 1
+            # default color
+            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_)
+            ax_.set_title(m_, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")
 
-        for j in range(i+1, nrows*ncols):
+        for j in range(i_, nrows*ncols):
             axesA[j].axis("off")
 
-        figA.suptitle(f"Combined Confusion Matrices - {outcome_col}", fontsize=14)
         plt.tight_layout()
-        figA.savefig(pdfA_path)
+        figA.suptitle(f"Combined Confusion Matrices - {outcome_col}")
+        plt.savefig(pdfA_path)
         plt.close(figA)
 
+    ##########################
+    # Bar plots, radial, etc. for classification
+    ##########################
+    for outcome_col in classification_outcomes:
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
+        n_methods = len(classifiers)
         nrowsB, ncolsB = decide_layout(n_methods)
         figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))
         if nrowsB*ncolsB == 1:
@@ -385,26 +391,29 @@ def main():
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
                 Xtemp = Xtemp.drop(columns=[o_])
-        feat_names = list(Xtemp.columns)
+        feat_names = np.array(Xtemp.columns)
 
-        for i, model_name in enumerate(method_names):
-            imps = method_importances[outcome_col][model_name]
+        i_ = 0
+        for m_ in classifiers.keys():
+            imps = method_importances[outcome_col][m_]
             sorted_idx = np.argsort(imps)[::-1]
-            ax_ = axesB[i]
-            feat_labels_temp = [feat_names[k] for k in sorted_idx]
-            ax_.barh(feat_labels_temp, imps[sorted_idx], color='steelblue')
+            ax_ = axesB[i_]
+            i_ += 1
+            bar_labels = feat_names[sorted_idx]
+            ax_.barh(bar_labels, imps[sorted_idx], color='steelblue')
             ax_.invert_yaxis()
-            ax_.set_title(model_name, fontsize=10)
+            ax_.set_title(m_, fontsize=10)
             ax_.set_xlabel("Mean Decrease")
 
-        for j in range(i+1, nrowsB*ncolsB):
+        for j in range(i_, nrowsB*ncolsB):
             axesB[j].axis("off")
 
-        figB.suptitle(f"Permutation Importances - {outcome_col}", fontsize=14)
+        figB.suptitle(f"Permutation Importances - {outcome_col}")
         plt.tight_layout()
-        figB.savefig(pdfB_path)
+        plt.savefig(pdfB_path)
         plt.close(figB)
 
+        # radial
         pdfC_path = os.path.join(output_dir, f"pdfC_{outcome_col}.pdf")
         nrowsC, ncolsC = decide_layout(n_methods)
         figC, axesC = plt.subplots(nrows=nrowsC, ncols=ncolsC,
@@ -415,55 +424,54 @@ def main():
         else:
             axesC = axesC.flatten()
 
-        all_imps_ = [method_importances[outcome_col][m] for m in method_names]
-        global_max = np.max([np.max(a) for a in all_imps_]) if all_imps_ else 1.0
-        base_angles = np.linspace(0, 2*math.pi, len(all_imps_[0]), endpoint=False).tolist()
-
-        # [CHANGE] Use variable name labels
-        Xtemp = data.drop(columns=[outcome_col])
+        # compute base angles once
+        # #features depends on the shape of Xtemp
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
                 Xtemp = Xtemp.drop(columns=[o_])
-        radial_feat_names = np.array(Xtemp.columns)
+        feat_names_for_radial = np.array(Xtemp.columns)
+        n_feat = len(feat_names_for_radial)
+        base_angles = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
-        for i, model_name in enumerate(method_names):
-            imps = method_importances[outcome_col][model_name]
+        i_ = 0
+        for m_ in classifiers.keys():
+            imps = method_importances[outcome_col][m_]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
-            # Use real variable names:
-            short_labels_for_plot = [radial_feat_names[k] for k in sorted_idx]
+            sorted_feats = feat_names_for_radial[sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            sub_angles = base_angles[:]
-            sub_angles += sub_angles[:1]
+            # angles
+            angles = base_angles[:]
+            angles += angles[:1]
 
-            ax_ = axesC[i]
-            the_color = outcome_colors.get(outcome_col, fallback_color)
-            ax_.plot(sub_angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
-            ax_.fill(sub_angles, rep_imps, alpha=0.25, color=the_color)
+            ax_ = axesC[i_]
+            i_ += 1
+            the_color = 'gray'
+            ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
+            ax_.fill(angles, rep_imps, alpha=0.25, color=the_color)
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
-            degs = np.degrees(sub_angles[:-1])
-            ax_.set_thetagrids(degs, labels=short_labels_for_plot, fontsize=6)
-            ax_.set_ylim(0, max(global_max, 0))
-            ax_.set_title(model_name, fontsize=10)
+            ax_.set_ylim(0, max(0, max(rep_imps)))
+            ax_.set_title(m_, fontsize=10)
 
-        for j in range(i+1, nrowsC*ncolsC):
+            # minimal "repel": we'll pass angles (except last), label them
+            # We do angles[:-1] for the label angles
+            label_angles = angles[:-1]
+            # We'll call repel_labels
+            repel_labels(ax_, label_angles, sorted_feats)
+
+        for j in range(i_, nrowsC*ncolsC):
             axesC[j].axis("off")
 
-        figC.suptitle(f"Radial Importances (Unified Scale) - {outcome_col}", fontsize=14)
-        legend_elems = []
-        the_color = outcome_colors.get(outcome_col, fallback_color)
-        line = plt.Line2D([0],[0], color=the_color, lw=2, label=outcome_col)
-        legend_elems.append(line)
-        figC.legend(handles=legend_elems, loc="lower center", bbox_to_anchor=(0.5, -0.05))
-        plt.tight_layout(rect=[0,0.05,1,1])
-        figC.savefig(pdfC_path)
+        figC.suptitle(f"Radial Importances (Minimal Repel) - {outcome_col}")
+        plt.tight_layout()
+        plt.savefig(pdfC_path)
         plt.close(figC)
 
-    ########################
-    # 5) Radial for regression outcomes
-    ########################
+    ##########################
+    # Do the same for regression radial
+    ##########################
     for outcome_col in continuous_outcomes:
         reg_method_names = list(regressors.keys())
         pdfC_reg_path = os.path.join(output_dir, f"pdfC_{outcome_col}_regression.pdf")
@@ -477,75 +485,74 @@ def main():
         else:
             axesCreg = axesCreg.flatten()
 
-        all_imps_r = [method_importances[outcome_col][r] for r in reg_method_names]
-        global_max_r = np.max([np.max(a) for a in all_imps_r]) if all_imps_r else 1.0
-        base_angles_r = np.linspace(0, 2*math.pi, len(all_imps_r[0]), endpoint=False).tolist()
-
-        # For variable names
+        # get the feature set
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
                 Xtemp = Xtemp.drop(columns=[o_])
-        radial_feat_names = np.array(Xtemp.columns)
+        feat_names_for_radial = np.array(Xtemp.columns)
+        n_feat = len(feat_names_for_radial)
+        base_angles_r = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
-        for i, r_name in enumerate(reg_method_names):
-            imps = method_importances[outcome_col][r_name]
+        i_ = 0
+        for regr_ in reg_method_names:
+            imps = method_importances[outcome_col][regr_]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
-            short_labels_for_plot = [radial_feat_names[k] for k in sorted_idx]
+            sorted_feats = feat_names_for_radial[sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            sub_angles_r = base_angles_r[:]
-            sub_angles_r += sub_angles_r[:1]
+            sub_angles = base_angles_r[:]
+            sub_angles += sub_angles[:1]
 
-            ax_ = axesCreg[i]
-            the_color = outcome_colors.get(outcome_col, fallback_color)
-            ax_.plot(sub_angles_r, rep_imps, linewidth=2, linestyle='solid', color=the_color)
-            ax_.fill(sub_angles_r, rep_imps, alpha=0.25, color=the_color)
+            ax_ = axesCreg[i_]
+            i_ += 1
+            the_color = 'gray'
+            ax_.plot(sub_angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
+            ax_.fill(sub_angles, rep_imps, alpha=0.25, color=the_color)
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
-            degs = np.degrees(sub_angles_r[:-1])
-            ax_.set_thetagrids(degs, labels=short_labels_for_plot, fontsize=6)
-            ax_.set_ylim(0, max(global_max_r, 0))
-            ax_.set_title(r_name, fontsize=10)
+            ax_.set_ylim(0, max(0, max(rep_imps)))
+            ax_.set_title(regr_, fontsize=10)
 
-        for j in range(i+1, nrowsR*ncolsR):
+            # minimal repel
+            repel_labels(ax_, sub_angles[:-1], sorted_feats)
+
+        for j in range(i_, nrowsR*ncolsR):
             axesCreg[j].axis("off")
 
-        figCreg.suptitle(f"Radial Importances (Regression) - {outcome_col}", fontsize=14)
-        legend_elems_r = []
-        the_color_r = outcome_colors.get(outcome_col, fallback_color)
-        line_r = plt.Line2D([0],[0], color=the_color_r, lw=2, label=outcome_col)
-        legend_elems_r.append(line_r)
-        figCreg.legend(handles=legend_elems_r, loc="lower center", bbox_to_anchor=(0.5, -0.05))
-        plt.tight_layout(rect=[0,0.05,1,1])
-        figCreg.savefig(pdfC_reg_path)
+        figCreg.suptitle(f"Radial Importances (Minimal Repel) - {outcome_col}")
+        plt.tight_layout()
+        plt.savefig(pdfC_reg_path)
         plt.close(figCreg)
 
-    ########################
-    # 6) Final recall heatmap for classification
-    ########################
-    print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
-    recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
-    plt.figure(figsize=(1.5*len(method_names), 1.2*len(classification_outcomes)))
-    class_recall_df = recall_df.loc[classification_outcomes, method_names]
-    sns.heatmap(class_recall_df, annot=True, cmap='cividis', fmt=".2f")
-    plt.title("Recall Scores Heatmap (Classification Outcomes vs. Methods)")
-    plt.xlabel("Methods")
-    plt.ylabel("Outcomes")
-    plt.tight_layout()
-    plt.savefig(recall_heatmap_path)
-    plt.close()
+    ##########################
+    #  Heatmap D: unify scale across all methods
+    ##########################
+    # 1) find global min, max across all method importances (all outcomes)
+    globalD_min = 9999999.0
+    globalD_max = -9999999.0
 
-    ########################
-    # 7) pdfD => inferno heatmap per method (unified scale)
-    ########################
     all_methods = list(classifiers.keys()) + list(regressors.keys())
     for method_name in all_methods:
+        for out_ in all_outcomes:
+            if method_name in method_importances[out_]:
+                arr_ = method_importances[out_][method_name]
+                if len(arr_):
+                    arr_min = min(arr_)
+                    arr_max = max(arr_)
+                    if arr_min < globalD_min:
+                        globalD_min = arr_min
+                    if arr_max > globalD_max:
+                        globalD_max = arr_max
+
+    # 2) produce pdfD with features as columns, outcomes as rows
+    # rotate feature names 90° at top
+    for method_name in all_methods:
+        # gather
         applicable_outcomes = []
         all_vals = []
         max_features = 0
-
         for out_ in all_outcomes:
             if method_name in method_importances[out_]:
                 arr_ = method_importances[out_][method_name]
@@ -559,283 +566,165 @@ def main():
         mat = np.zeros((len(applicable_outcomes), max_features))
         row_labels = list(applicable_outcomes)
 
-        global_minD = min(all_vals) if all_vals else 0.0
-        global_maxD = max(all_vals) if all_vals else 1.0
-
         for i, out_ in enumerate(applicable_outcomes):
             arr_ = method_importances[out_][method_name]
             mat[i, :len(arr_)] = arr_
 
-        col_labels = [f"feature_{i}" for i in range(max_features)]
+        col_labels = [f"feat_{i}" for i in range(max_features)]
         pdfD_path = os.path.join(output_dir, f"pdfD_{method_name}.pdf")
         plt.figure(figsize=(1.2*max_features, 1.2*len(applicable_outcomes)))
+        # unify scale = globalD_min, globalD_max
         sns.heatmap(mat, annot=False, cmap='inferno',
                     xticklabels=col_labels, yticklabels=row_labels,
-                    vmin=global_minD, vmax=global_maxD)
-        plt.title(f"Inferno Heatmap - {method_name} (Importances)")
+                    vmin=globalD_min, vmax=globalD_max)
+        plt.xticks(rotation=90)
+        plt.title(f"Inferno Heatmap - {method_name} (Importances), Unif Scale")
         plt.xlabel("Features")
         plt.ylabel("Outcomes")
         plt.tight_layout()
         plt.savefig(pdfD_path)
         plt.close()
 
-    ########################
-    # 8) Print regression metrics (RMSE, MAE, etc.)
-    ########################
-    reg_metrics_file = os.path.join(output_dir, "regression_metrics_summary.txt")
-    with open(reg_metrics_file, "w") as f:
-        f.write("Regression Metrics (MSE, RMSE, MAE, R2)\n")
-        for out_ in continuous_outcomes:
-            f.write(f"\nOutcome: {out_}\n")
-            for m_ in regressors.keys():
-                if m_ in regression_metrics[out_]:
-                    mse_val, rmse_val, mae_val, r2_val = regression_metrics[out_][m_]
-                    f.write(f"  {m_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
+    ##########################
+    #  Subset approach: "top best features" 
+    ##########################
+    # We'll do EXACTLY your approach, but at the end we re-run "the entire pipeline" with those subsets
+    # We'll store in 'subset' folder
 
-    ########################
-    # 9) SUBSET Step: pick features by importance cutoff, re-run pipeline, store in "subset/" subfolder
-    ########################
-
+    # We'll define a simple approach: topN=5, or cutoff=0.02
+    top_importance_cutoff = 0.02
     subset_dir = os.path.join(output_dir, "subset")
     os.makedirs(subset_dir, exist_ok=True)
 
-    # We'll define a cutoff for importance: e.g., 0.02. If no features pass, fallback to top 1.
-    top_importance_cutoff = 0.02
-
     best_features_dict = {}
 
-    # (a) For classification outcomes: pick the method with highest recall, then pick features by cutoff.
+    def pick_subset_features_importances(outcome_col, method_name):
+        # fetch importances
+        imps = method_importances[outcome_col][method_name]
+        # define Xtemp to get feat names
+        Xtemp = data.drop(columns=[outcome_col])
+        for o_ in all_outcomes:
+            if o_ != outcome_col and o_ in Xtemp.columns:
+                Xtemp = Xtemp.drop(columns=[o_])
+        feat_names = np.array(Xtemp.columns)
+        mask = (imps > top_importance_cutoff)
+        if not np.any(mask):
+            # fallback to single most important
+            top_idx = [np.argmax(imps)]
+        else:
+            top_idx = np.where(mask)[0]
+        return feat_names[top_idx].tolist()
+
+    # classification
     for outcome_col in classification_outcomes:
         best_method = None
-        best_recall = -1.0
+        best_val = -999
         for m_ in classifiers.keys():
-            val = recall_df.loc[outcome_col, m_]
-            if val > best_recall:
-                best_recall = val
+            rec_ = recall_df.loc[outcome_col, m_]
+            if rec_ > best_val:
+                best_val = rec_
                 best_method = m_
-
         if best_method:
-            # get importances from method_importances
-            imps = method_importances[outcome_col][best_method]
-            # gather feature names
-            Xtemp = data.drop(columns=[outcome_col])
-            for o_ in all_outcomes:
-                if o_ != outcome_col and o_ in Xtemp.columns:
-                    Xtemp = Xtemp.drop(columns=[o_])
-            feat_names = np.array(Xtemp.columns)
+            feats_ = pick_subset_features_importances(outcome_col, best_method)
+            best_features_dict[outcome_col] = feats_
 
-            # find all feats with importance > cutoff. If none, fallback to top 1.
-            mask = (imps > top_importance_cutoff)
-            if not np.any(mask):
-                # fallback to the single most important feature
-                top_idx = [np.argmax(imps)]
-            else:
-                top_idx = np.where(mask)[0]
-
-            best_feat_names = feat_names[top_idx]
-            best_features_dict[outcome_col] = best_feat_names.tolist()
-
-    # (b) For continuous outcomes: pick method with best MSE, then pick features by cutoff.
-    def get_best_mse_method(outcome_col):
-        best_method = None
-        best_mse = 1e15
-        for m_ in regressors.keys():
-            if outcome_col in regression_metrics and m_ in regression_metrics[outcome_col]:
-                (mse_val, rmse_val, mae_val, r2_val) = regression_metrics[outcome_col][m_]
-                if mse_val < best_mse:
-                    best_mse = mse_val
-                    best_method = m_
-        return best_method
+    # regression
+    def best_mse_method_for_outcome(out_):
+        # find minimal MSE in regression_metrics[out_]
+        min_mse = 9999999
+        best_m = None
+        if out_ in regression_metrics:
+            for regr_ in regressors.keys():
+                if regr_ in regression_metrics[out_]:
+                    (mse_val, rmse_val, mae_val, r2_val) = regression_metrics[out_][regr_]
+                    if mse_val < min_mse:
+                        min_mse = mse_val
+                        best_m = regr_
+        return best_m
 
     for outcome_col in continuous_outcomes:
-        best_method = get_best_mse_method(outcome_col)
-        if best_method:
-            imps = method_importances[outcome_col][best_method]
-            Xtemp = data.drop(columns=[outcome_col])
-            for o_ in all_outcomes:
-                if o_ != outcome_col and o_ in Xtemp.columns:
-                    Xtemp = Xtemp.drop(columns=[o_])
-            feat_names = np.array(Xtemp.columns)
+        best_m = best_mse_method_for_outcome(outcome_col)
+        if best_m:
+            feats_ = pick_subset_features_importances(outcome_col, best_m)
+            best_features_dict[outcome_col] = feats_
 
-            mask = (imps > top_importance_cutoff)
-            if not np.any(mask):
-                top_idx = [np.argmax(imps)]
-            else:
-                top_idx = np.where(mask)[0]
+    # We'll define a helper to re-run "entire pipeline" but only for these outcomes
+    def re_run_pipeline_subset(data, outcome_col, feats, outdir):
+        """
+        We'll store some minimal info to screen and log, e.g. classification confusion or regression metrics.
+        """
+        # build smaller data
+        subset_cols = feats + [outcome_col]
+        if len(subset_cols) != len(set(subset_cols)):
+            # ensure no duplicates
+            subset_cols = list(set(subset_cols))
+        sub_data = data[subset_cols].copy()
 
-            best_feat_names = feat_names[top_idx]
-            best_features_dict[outcome_col] = best_feat_names.tolist()
+        # check classification or continuous
+        is_cont = (outcome_col in continuous_outcomes)
 
-    # Now we define a new function that re-trains on the subset and also prints evaluation metrics.
-    def retrain_on_subset(outcome_col, top_features, out_folder):
-        subset_cols = list(top_features) + [outcome_col]
-        subset_data = data[subset_cols].copy()
-        is_continuous = outcome_col in continuous_outcomes
+        print(f"[SUBSET] Re-running pipeline for {outcome_col}, feats={feats}")
+        with open(os.path.join(outdir, f"subset_{outcome_col}_log.txt"), "w") as f_:
+            if not is_cont:
+                # classification
+                X = sub_data.drop(columns=[outcome_col])
+                y = sub_data[outcome_col].copy()
+                for c_ in X.columns:
+                    if X[c_].dtype == 'object':
+                        X[c_] = LabelEncoder().fit_transform(X[c_].astype(str))
+                try:
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X, y, test_size=0.2, stratify=y, random_state=999
+                    )
+                except:
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=999)
+                sc_ = StandardScaler()
+                X_train = sc_.fit_transform(X_train)
+                X_test = sc_.transform(X_test)
 
-        X = subset_data.drop(columns=[outcome_col])
-        y = subset_data[outcome_col].copy()
-
-        for c in X.columns:
-            if X[c].dtype == 'object':
-                X[c] = LabelEncoder().fit_transform(X[c].astype(str))
-
-        try:
-            if not is_continuous:
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
-                                                                    random_state=999, stratify=y)
-            else:
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
-                                                                    random_state=999)
-        except ValueError:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=999)
-
-        sca = StandardScaler()
-        X_train = sca.fit_transform(X_train)
-        X_test = sca.transform(X_test)
-
-        if not is_continuous:
-            # classification: do confusion + recall in a text file or so.
-            # 1) We create a confusion pdf, like before.
-            pdfA_path = os.path.join(out_folder, f"subset_pdfA_{outcome_col}.pdf")
-            n_methods = len(classifiers)
-            nrows, ncols = decide_layout(n_methods)
-            figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 4*nrows))
-            if nrows*ncols == 1:
-                axesA = [axesA]
-            else:
-                axesA = axesA.flatten()
-
-            # We'll also create a .txt with recall metrics for the subset.
-            subset_txt_path = os.path.join(out_folder, f"subset_metrics_{outcome_col}.txt")
-            with open(subset_txt_path, "w") as f_out:
-                f_out.write(f"Classification subset metrics for {outcome_col}\n\n")
-
-                idx_ = 0
+                # evaluate each classifier
+                f_.write(f"[SUBSET] Classification for {outcome_col}, feats={feats}\n\n")
                 for m_ in classifiers.keys():
-                    clf = classifiers[m_]
-                    clf.fit(X_train, y_train)
-                    y_pred = clf.predict(X_test)
-
+                    clf_ = classifiers[m_]
+                    clf_.fit(X_train, y_train)
+                    y_pred = clf_.predict(X_test)
                     rec_ = recall_score(y_test, y_pred, average='macro')
-                    conf_ = confusion_matrix(y_test, y_pred)
+                    f_.write(f"{m_}: recall={rec_:.2f}\n")
 
-                    ax_ = axesA[idx_]
-                    sns.heatmap(conf_, annot=True, cmap=darkblue_cmap, fmt='g', ax=ax_)
-                    ax_.set_title(m_, fontsize=10)
-                    ax_.set_xlabel("Predicted")
-                    ax_.set_ylabel("Actual")
-                    idx_ += 1
-
-                    f_out.write(f"{m_}: recall={rec_:.2f}\n")
-
-                for j in range(idx_, nrows*ncols):
-                    axesA[j].axis("off")
-
-            figA.suptitle(f"Subset Confusion (outcome={outcome_col})", fontsize=14)
-            plt.tight_layout()
-            figA.savefig(pdfA_path)
-            plt.close(figA)
-
-        else:
-            # regression: do radial + MSE, R2, etc.
-            pdfC_reg_path = os.path.join(out_folder, f"subset_pdfC_{outcome_col}_regression.pdf")
-            n_methods = len(regressors)
-            nrowsR, ncolsR = decide_layout(n_methods)
-            figCreg, axesCreg = plt.subplots(nrows=nrowsR, ncols=ncolsR,
-                                             figsize=(6*ncolsR, 5*nrowsR),
-                                             subplot_kw=dict(polar=True))
-            if nrowsR*ncolsR == 1:
-                axesCreg = [axesCreg]
             else:
-                axesCreg = axesCreg.flatten()
+                # regression
+                X = sub_data.drop(columns=[outcome_col])
+                y = sub_data[outcome_col].copy()
+                for c_ in X.columns:
+                    if X[c_].dtype == 'object':
+                        X[c_] = LabelEncoder().fit_transform(X[c_].astype(str))
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=999)
+                sc_ = StandardScaler()
+                X_train = sc_.fit_transform(X_train)
+                X_test = sc_.transform(X_test)
 
-            # We'll store metrics in a text file.
-            subset_txt_path = os.path.join(out_folder, f"subset_metrics_{outcome_col}.txt")
-            with open(subset_txt_path, "w") as f_out:
-                f_out.write(f"Regression subset metrics for {outcome_col}\n\n")
-
-                idx_ = 0
-                all_imps_list = []
-                # gather feat names for radial labels
-                radial_feat_names_subset = np.array(X.columns)
-
-                for m_ in regressors.keys():
-                    regr = regressors[m_]
-                    regr.fit(X_train, y_train)
-                    y_pred = regr.predict(X_test)
-
+                f_.write(f"[SUBSET] Regression for {outcome_col}, feats={feats}\n\n")
+                for regr_ in regressors.keys():
+                    model_ = regressors[regr_]
+                    model_.fit(X_train, y_train)
+                    y_pred = model_.predict(X_test)
                     mse_val = mean_squared_error(y_test, y_pred)
                     rmse_val = math.sqrt(mse_val)
                     mae_val = mean_absolute_error(y_test, y_pred)
                     r2_val = r2_score(y_test, y_pred)
-                    f_out.write(f"{m_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
+                    f_.write(f"{regr_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
 
-                    perm_res = permutation_importance(regr, X_test, y_test, n_repeats=5,
-                                                      random_state=999, n_jobs=-1)
-                    imps = perm_res.importances_mean
-                    all_imps_list.append(imps)
+    # finally we run the subset pipeline for each outcome
+    subset_out = os.path.join(output_dir, "subset")
+    os.makedirs(subset_out, exist_ok=True)
+    for out_ in all_outcomes:
+        if out_ in best_features_dict:
+            sub_feats = best_features_dict[out_]
+            re_run_pipeline_subset(data, out_, sub_feats, subset_out)
 
-                if all_imps_list:
-                    global_max_r = np.max([np.max(a) for a in all_imps_list])
-                else:
-                    global_max_r = 1.0
+    print("\n[INFO] Done with the entire pipeline, using default confusion-colors, minimal label repel in radial,")
+    print("[INFO] unified scale in pdfD, and repeated subset pipeline in 'subset/' folder. Enjoy!")
 
-                base_angles_r = np.linspace(0, 2*math.pi, len(all_imps_list[0]), endpoint=False).tolist()
 
-                # re-run the loop to plot radial
-                for m_ in regressors.keys():
-                    regr = regressors[m_]
-                    regr.fit(X_train, y_train)
-                    perm_res = permutation_importance(regr, X_test, y_test, n_repeats=5,
-                                                      random_state=999, n_jobs=-1)
-                    imps = perm_res.importances_mean
-                    sorted_idx = np.argsort(imps)[::-1]
-                    sorted_imps = imps[sorted_idx]
-
-                    # Now use actual variable names in radial:
-                    short_labels_for_plot = [radial_feat_names_subset[k] for k in sorted_idx]
-
-                    rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-                    sub_angles_r = base_angles_r[:]
-                    sub_angles_r += sub_angles_r[:1]
-
-                    ax_ = axesCreg[idx_]
-                    the_color_r = 'darkgreen'
-                    ax_.plot(sub_angles_r, rep_imps, linewidth=2, linestyle='solid', color=the_color_r)
-                    ax_.fill(sub_angles_r, rep_imps, alpha=0.25, color=the_color_r)
-                    ax_.set_theta_offset(math.pi/2)
-                    ax_.set_theta_direction(-1)
-                    degs = np.degrees(sub_angles_r[:-1])
-                    ax_.set_thetagrids(degs, labels=short_labels_for_plot, fontsize=6)
-                    ax_.set_ylim(0, max(global_max_r, 0))
-                    ax_.set_title(m_, fontsize=10)
-                    idx_ += 1
-
-                for j in range(idx_, nrowsR*ncolsR):
-                    axesCreg[j].axis("off")
-
-            figCreg.suptitle(f"Subset Radial (outcome={outcome_col})", fontsize=14)
-            plt.tight_layout(rect=[0,0.05,1,1])
-            figCreg.savefig(pdfC_reg_path)
-            plt.close(figCreg)
-
-    # Now actually re-run for each outcome with the new subset approach.
-    for outcome_col in all_outcomes:
-        if outcome_col in method_importances:
-            if outcome_col in best_features_dict:
-                subfolder = os.path.join(subset_dir, outcome_col)
-                os.makedirs(subfolder, exist_ok=True)
-                top_features = best_features_dict[outcome_col]
-                retrain_on_subset(outcome_col, top_features, subfolder)
-
-    print(f"\n[INFO] Done!\n"
-          f"For each classification outcome, we created:\n"
-          f"  1) pdfA_<outcome>.pdf => confusion (darkblue)\n"
-          f"  2) pdfB_<outcome>.pdf => bar chart, same color,\n"
-          f"  3) pdfC_<outcome>.pdf => radial (with real feature names)\n"
-          f"For continuous outcomes, separate regression approach with MSE, R2, RMSE, MAE.\n"
-          f"Finally 'pdfD_<method>.pdf' => inferno heatmap.\n"
-          f"Subset approach uses an importance cutoff = 0.02, re-run pipeline => in subfolder 'subset', with metrics.\n")
-    
 if __name__ == "__main__":
     main()

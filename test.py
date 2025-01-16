@@ -306,7 +306,7 @@ def main():
             method_importances[outcome_col][r_] = importances
 
     ########################
-    # 5) Confusion matrix plots with pale colors
+    # 5) Confusion matrix plots with tab20
     ########################
     def decide_layout(n):
         if n <= 4:
@@ -328,15 +328,15 @@ def main():
         else:
             axesA = axesA.flatten()
 
-        # "light:blue" for a pale color
-        pale_cmap = sns.color_palette("light:blue", as_cmap=True)
+        # tab20
+        tab20_cmap = sns.color_palette("tab20", as_cmap=True)
 
         i_ = 0
         for m_ in method_names_cls:
             conf_ = method_conf_matrices[outcome_col][m_]
             ax_ = axesA[i_]
             i_ += 1
-            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=pale_cmap)
+            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=tab20_cmap)
             ax_.set_title(m_, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")
@@ -400,10 +400,12 @@ def main():
             axesC = axesC.flatten()
 
         # compute base angles
+        # we do the same logic to define feats
+        Xtemp2 = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
-            if o_ != outcome_col and o_ in Xtemp.columns:
-                Xtemp = Xtemp.drop(columns=[o_])
-        feat_names_for_radial = np.array(Xtemp.columns)
+            if o_ != outcome_col and o_ in Xtemp2.columns:
+                Xtemp2 = Xtemp2.drop(columns=[o_])
+        feat_names_for_radial = np.array(Xtemp2.columns)
         n_feat = len(feat_names_for_radial)
         base_angles = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
@@ -428,8 +430,10 @@ def main():
             ax_.set_ylim(0, max(0, max(rep_imps)))
             ax_.set_title(m_, fontsize=10)
 
-            # label them at angles
-            # no "repel" approach
+            # label them at angles 
+            # no "repel," just direct set_thetagrids
+            degs = np.degrees(angles[:-1])
+            ax_.set_thetagrids(degs, labels=sorted_feats, fontsize=6)
 
         for j in range(i_, nrowsC*ncolsC):
             axesC[j].axis("off")
@@ -455,11 +459,11 @@ def main():
         else:
             axesCreg = axesCreg.flatten()
 
-        Xtemp = data.drop(columns=[outcome_col])
+        XtempR = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
-            if o_ != outcome_col and o_ in Xtemp.columns:
-                Xtemp = Xtemp.drop(columns=[o_])
-        feat_names_for_radial = np.array(Xtemp.columns)
+            if o_ != outcome_col and o_ in XtempR.columns:
+                XtempR = XtempR.drop(columns=[o_])
+        feat_names_for_radial = np.array(XtempR.columns)
         n_feat = len(feat_names_for_radial)
         base_angles_r = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
@@ -471,18 +475,22 @@ def main():
             sorted_feats = feat_names_for_radial[sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            angles = base_angles_r[:]
-            angles += angles[:1]
+            angles_r = base_angles_r[:]
+            angles_r += angles_r[:1]
 
             ax_ = axesCreg[i_]
             i_ += 1
             the_color = 'gray'
-            ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
-            ax_.fill(angles, rep_imps, alpha=0.25, color=the_color)
+            ax_.plot(angles_r, rep_imps, linewidth=2, linestyle='solid', color=the_color)
+            ax_.fill(angles_r, rep_imps, alpha=0.25, color=the_color)
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
             ax_.set_ylim(0, max(0, max(rep_imps)))
             ax_.set_title(r_, fontsize=10)
+
+            # label them
+            degs = np.degrees(angles_r[:-1])
+            ax_.set_thetagrids(degs, labels=sorted_feats, fontsize=6)
 
         for j in range(i_, nrowsR*ncolsR):
             axesCreg[j].axis("off")
@@ -495,7 +503,6 @@ def main():
     ########################
     # 8) pdfD => unify scale + actual names
     ########################
-    # gather global min, max
     global_minD = float('inf')
     global_maxD = float('-inf')
     all_methods = list(classifiers.keys()) + list(regressors.keys())
@@ -512,13 +519,11 @@ def main():
                     if arr_max > global_maxD:
                         global_maxD = arr_max
 
-    # For each method, we create a matrix row=outcomes, col=actual features (i.e. the union of features across data minus outcomes).
-    # We'll define 'all_feats' = data.drop(columns=all_outcomes).columns
+    # define the global set of potential features (excluding outcomes)
     all_feats = data.drop(columns=all_outcomes, errors='ignore').columns.tolist()
     n_all_feats = len(all_feats)
 
     for method_name in all_methods:
-        # find which outcomes used that method
         used_outs = []
         for out_ in all_outcomes:
             if method_name in method_importances[out_]:
@@ -527,22 +532,17 @@ def main():
         if not used_outs:
             continue
 
-        # build a matrix: shape=(len(used_outs), n_all_feats)
         mat = np.zeros((len(used_outs), n_all_feats))
         row_labels = used_outs
 
-        # fill each row
         for i, out_ in enumerate(used_outs):
-            # we have an importance array (length is #features in X after dropping that outcome).
-            # we must align it with 'all_feats'. So we do:
-            Xtemp = data.drop(columns=[out_], errors='ignore')
-            for o_ in all_outcomes:
-                if o_ != out_ and o_ in Xtemp.columns:
-                    Xtemp = Xtemp.drop(columns=[o_], errors='ignore')
-            feats_for_out = list(Xtemp.columns)
+            XtempD = data.drop(columns=[out_], errors='ignore')
+            for xo in all_outcomes:
+                if xo != out_ and xo in XtempD.columns:
+                    XtempD = XtempD.drop(columns=[xo], errors='ignore')
+            feats_for_out = list(XtempD.columns)
             imps_arr = method_importances[out_][method_name]
 
-            # map each 'feats_for_out[j]' to the index in 'all_feats' if present
             for j, feat_j in enumerate(feats_for_out):
                 if feat_j in all_feats:
                     col_idx = all_feats.index(feat_j)
@@ -564,9 +564,8 @@ def main():
         plt.close()
 
     ########################
-    # 9) Output regression metrics + final "best" feature retrieval
+    # 9) Output regression metrics
     ########################
-    # minimal text file for regression
     reg_metrics_file = os.path.join(output_dir, "regression_metrics_summary.txt")
     with open(reg_metrics_file, "w") as f:
         f.write("Regression Metrics (MSE, RMSE, MAE, R2)\n\n")
@@ -574,92 +573,28 @@ def main():
             f.write(f"Outcome: {out_}\n")
             if out_ not in regression_metrics:
                 continue
-            for r_ in regressors.keys():
+            for r_ in method_names_reg:
                 if r_ in regression_metrics[out_]:
                     mse_val, rmse_val, mae_val, r2_val = regression_metrics[out_][r_]
                     f.write(f"  {r_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
             f.write("\n")
 
-    # "best" features overall: pick best method for each outcome, gather top 5 or so
-    # or we can do a union of all features with importance > 0.02 for each best method?
-    # We'll do a simpler approach: pick best method => top 5 for that outcome => union them
-    top_cutoff = 0.02
-    best_features_union = set()
+    ########################
+    # Finally, recall heatmap for classification
+    ########################
+    print("\n[INFO] Generating unified RECALL score heatmap across classification outcomes & methods...")
+    recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
+    plt.figure(figsize=(1.5*len(method_names_cls), 1.2*len(classification_outcomes)))
+    class_recall_df = recall_df.loc[classification_outcomes, method_names_cls]
+    sns.heatmap(class_recall_df, annot=True, cmap='cividis', fmt=".2f")
+    plt.title("Recall Scores Heatmap (Classification Outcomes vs. Methods)")
+    plt.xlabel("Methods")
+    plt.ylabel("Outcomes")
+    plt.tight_layout()
+    plt.savefig(recall_heatmap_path)
+    plt.close()
 
-    # classification best methods
-    for out_ in classification_outcomes:
-        best_m = None
-        best_val = -999
-        for m_ in method_names_cls:
-            rec_ = recall_df.loc[out_, m_]
-            if rec_ > best_val:
-                best_val = rec_
-                best_m = m_
-        if best_m:
-            # retrieve importances
-            Xtemp = data.drop(columns=[out_], errors='ignore')
-            for xo in all_outcomes:
-                if xo != out_ and xo in Xtemp.columns:
-                    Xtemp = Xtemp.drop(columns=[xo], errors='ignore')
-            feats = Xtemp.columns
-            imps = method_importances[out_][best_m]
-
-            # find which feats pass top_cutoff
-            mask = (imps > top_cutoff)
-            if not np.any(mask):
-                top_idx = [np.argmax(imps)]
-            else:
-                top_idx = np.where(mask)[0]
-            for idx_ in top_idx:
-                best_features_union.add(feats[idx_])
-
-    # regression best methods
-    def best_mse_method(out_):
-        best_m = None
-        best_mse = float('inf')
-        if out_ in regression_metrics:
-            for r_ in regressors.keys():
-                if r_ in regression_metrics[out_]:
-                    (mse_val, rmse_val, mae_val, r2_val) = regression_metrics[out_][r_]
-                    if mse_val < best_mse:
-                        best_mse = mse_val
-                        best_m = r_
-        return best_m
-
-    for out_ in continuous_outcomes:
-        bm_ = best_mse_method(out_)
-        if bm_:
-            Xtemp = data.drop(columns=[out_], errors='ignore')
-            for xo in all_outcomes:
-                if xo != out_ and xo in Xtemp.columns:
-                    Xtemp = Xtemp.drop(columns=[xo], errors='ignore')
-            feats = Xtemp.columns
-            imps = method_importances[out_][bm_]
-
-            mask = (imps > top_cutoff)
-            if not np.any(mask):
-                top_idx = [np.argmax(imps)]
-            else:
-                top_idx = np.where(mask)[0]
-            for idx_ in top_idx:
-                best_features_union.add(feats[idx_])
-
-    # best_features_union now has all selected features
-    # final "subset" of the input dataframe with these best features
-    # plus we keep the original outcomes
-    final_subset_cols = list(best_features_union) + all_outcomes
-    final_subset_cols = list(dict.fromkeys(final_subset_cols))  # remove duplicates if any
-
-    # We'll produce a DataFrame
-    final_subset_df = data[final_subset_cols].copy()
-    # optional: save to CSV
-    subset_csv_path = os.path.join(output_dir, "best_features_overall_subset.csv")
-    final_subset_df.to_csv(subset_csv_path, sep=';', index=True)
-
-    print(f"\n[INFO] Done! We used pale confusion matrices ('light:blue'), removed repel,")
-    print(f"[INFO] used actual feature names in plotD, removed the subset pipeline re-run,")
-    print(f"[INFO] and wrote the best-features overall subset to: {subset_csv_path}")
-
+    print("\n[INFO] All done. Produced confusion matrices, labeled radial plots with feature names,")
 
 if __name__ == "__main__":
     main()

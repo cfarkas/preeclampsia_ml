@@ -76,9 +76,7 @@ from sklearn.metrics import (
     mean_absolute_error
 )
 
-# MLP
 from sklearn.neural_network import MLPClassifier
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.naive_bayes import GaussianNB 
@@ -92,7 +90,6 @@ from sklearn.ensemble import (
 )
 from sklearn.svm import SVC
 from sklearn.inspection import permutation_importance
-
 
 ###############################################################################
 # Argument Parsing
@@ -120,34 +117,6 @@ def parse_arguments():
     )
     return parser.parse_args()
 
-###############################################################################
-# Minimal "repel" approach for radial
-###############################################################################
-def repel_labels(ax, angles, labels):
-    """
-    Attempt to offset overlapping labels (a minimal approach).
-    We'll check distances in angle space & offset them slightly if they are too close.
-    This is not a perfect approach but a demonstration of a minimal "repel."
-    """
-    if len(labels) < 2:
-        return
-    # angles are len(...) = len(labels). We'll store new angles in array:
-    new_angles = angles[:]
-    offset = 0.03  # small offset in radians
-    for i in range(len(labels)):
-        for j in range(i+1, len(labels)):
-            if abs(new_angles[i] - new_angles[j]) < offset/2:
-                # push one label slightly
-                new_angles[j] += offset
-    # Now we place them manually
-    for i, lbl in enumerate(labels):
-        # We convert angle to x,y
-        ang = new_angles[i]
-        x = 1.05 * math.cos(ang)  # radius slightly >1
-        y = 1.05 * math.sin(ang)
-        ax.text( x, y, lbl, fontsize=6, ha='center', va='center',
-                 rotation=math.degrees(ang - math.pi/2))
-
 def main():
     args = parse_arguments()
 
@@ -174,15 +143,18 @@ def main():
     output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1) Load Data
+    ########################
+    # 1) Load Data + correlation
+    ########################
     data = pd.read_csv(input_csv, delimiter=';', index_col='id')
 
-    # correlation matrix (with 'seismic')
     corr_matrix = data.corr()
     plt.figure(figsize=(30, 24))
-    ax = sns.heatmap(corr_matrix, annot=True, cmap='seismic', fmt='.2f',
-                     annot_kws={"size":12}, linewidths=0.5, linecolor='white',
-                     cbar_kws={'shrink':0.5}, vmin=-1, vmax=1)
+    ax = sns.heatmap(
+        corr_matrix, annot=True, cmap='seismic', fmt='.2f',
+        annot_kws={"size":12}, linewidths=0.5, linecolor='white',
+        cbar_kws={'shrink':0.5}, vmin=-1, vmax=1
+    )
     cbar = ax.collections[0].colorbar
     cbar.ax.tick_params(labelsize=14)
     plt.xticks(rotation=90, ha='right', fontsize=14)
@@ -192,7 +164,9 @@ def main():
     plt.savefig(corr_path, bbox_inches='tight')
     plt.close()
 
-    # outcomes
+    ########################
+    # 2) Define outcomes
+    ########################
     all_outcomes = [
         "gestational_age_delivery",
         "newborn_weight",
@@ -206,7 +180,7 @@ def main():
     continuous_outcomes = ["gestational_age_delivery", "newborn_weight"]
     classification_outcomes = [o for o in all_outcomes if o not in continuous_outcomes]
 
-    # classifiers
+    # classifiers & regressors
     classifiers = {
         "LogisticRegression": LogisticRegression(random_state=42, solver='newton-cholesky', max_iter=100),
         "LinearDiscriminantAnalysis": LinearDiscriminantAnalysis(),
@@ -218,32 +192,33 @@ def main():
         "SVM": SVC(probability=True, random_state=42),
         "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=42)
     }
-    method_names = list(classifiers.keys())
-
     regressors = {
         "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=42),
         "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=42)
     }
 
-    # store classification recall, regression metrics
-    recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names)
+    method_names_cls = list(classifiers.keys())
+    method_names_reg = list(regressors.keys())
+
+    # Store classification recall, regression metrics
+    recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names_cls)
     regression_metrics = {}
 
     method_importances = {out: {} for out in all_outcomes}
     method_conf_matrices = {out: {} for out in classification_outcomes}
 
-    ############################
-    # Classification pipeline
-    ############################
+    ########################
+    # 3) Classification
+    ########################
     for outcome_col in classification_outcomes:
         X = data.drop(columns=[outcome_col])
-        # remove other outcomes
         others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
             if o_ in X.columns:
                 X = X.drop(columns=[o_])
         y = data[outcome_col].copy()
 
+        # encode
         for c in X.columns:
             if X[c].dtype == 'object':
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
@@ -257,38 +232,36 @@ def main():
                 X, y, test_size=0.2, random_state=42
             )
 
-        sc = StandardScaler()
-        X_train = sc.fit_transform(X_train)
-        X_test = sc.transform(X_test)
+        sc_ = StandardScaler()
+        X_train = sc_.fit_transform(X_train)
+        X_test = sc_.transform(X_test)
         feat_names = np.array(X.columns)
 
-        for m_ in classifiers.keys():
+        for m_ in method_names_cls:
             clf = classifiers[m_]
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
-            # store recall
             rec_ = recall_score(y_test, y_pred, average='macro')
             recall_df.loc[outcome_col, m_] = rec_
 
-            # confusion
             conf_ = confusion_matrix(y_test, y_pred)
             method_conf_matrices[outcome_col][m_] = conf_
 
-            # permutation
+            # importances
             try:
                 perm_res = permutation_importance(
                     clf, X_test, y_test, n_repeats=5, random_state=42, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
-            except Exception as e:
+            except:
                 importances = np.zeros(len(feat_names))
 
             method_importances[outcome_col][m_] = importances
 
-    ##########################
-    # Regression pipeline
-    ##########################
+    ########################
+    # 4) Regression
+    ########################
     for outcome_col in continuous_outcomes:
         X = data.drop(columns=[outcome_col])
         others = [o for o in all_outcomes if o != outcome_col]
@@ -304,15 +277,15 @@ def main():
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42
         )
-        sc = StandardScaler()
-        X_train = sc.fit_transform(X_train)
-        X_test = sc.transform(X_test)
+        sc_ = StandardScaler()
+        X_train = sc_.fit_transform(X_train)
+        X_test = sc_.transform(X_test)
         feat_names = np.array(X.columns)
 
         regression_metrics[outcome_col] = {}
 
-        for regr_ in regressors.keys():
-            model_ = regressors[regr_]
+        for r_ in method_names_reg:
+            model_ = regressors[r_]
             model_.fit(X_train, y_train)
             y_pred = model_.predict(X_test)
 
@@ -320,7 +293,7 @@ def main():
             rmse_val = math.sqrt(mse_val)
             mae_val = mean_absolute_error(y_test, y_pred)
             r2_val = r2_score(y_test, y_pred)
-            regression_metrics[outcome_col][regr_] = (mse_val, rmse_val, mae_val, r2_val)
+            regression_metrics[outcome_col][r_] = (mse_val, rmse_val, mae_val, r2_val)
 
             try:
                 perm_res = permutation_importance(
@@ -330,11 +303,11 @@ def main():
             except:
                 importances = np.zeros(len(feat_names))
 
-            method_importances[outcome_col][regr_] = importances
+            method_importances[outcome_col][r_] = importances
 
-    ##########################
-    # Confusion matrix plots (with default colors)
-    ##########################
+    ########################
+    # 5) Confusion matrix plots with pale colors
+    ########################
     def decide_layout(n):
         if n <= 4:
             return (1, n)
@@ -347,7 +320,7 @@ def main():
 
     for outcome_col in classification_outcomes:
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
-        n_methods = len(classifiers)
+        n_methods = len(method_names_cls)
         nrows, ncols = decide_layout(n_methods)
         figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 4*nrows))
         if nrows*ncols == 1:
@@ -355,13 +328,15 @@ def main():
         else:
             axesA = axesA.flatten()
 
+        # "light:blue" for a pale color
+        pale_cmap = sns.color_palette("light:blue", as_cmap=True)
+
         i_ = 0
-        for m_ in classifiers.keys():
+        for m_ in method_names_cls:
             conf_ = method_conf_matrices[outcome_col][m_]
             ax_ = axesA[i_]
             i_ += 1
-            # default color
-            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_)
+            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=pale_cmap)
             ax_.set_title(m_, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")
@@ -374,12 +349,12 @@ def main():
         plt.savefig(pdfA_path)
         plt.close(figA)
 
-    ##########################
-    # Bar plots, radial, etc. for classification
-    ##########################
+    ########################
+    # 6) Bar plots, radial, etc. for classification
+    ########################
     for outcome_col in classification_outcomes:
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
-        n_methods = len(classifiers)
+        n_methods = len(method_names_cls)
         nrowsB, ncolsB = decide_layout(n_methods)
         figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))
         if nrowsB*ncolsB == 1:
@@ -394,7 +369,7 @@ def main():
         feat_names = np.array(Xtemp.columns)
 
         i_ = 0
-        for m_ in classifiers.keys():
+        for m_ in method_names_cls:
             imps = method_importances[outcome_col][m_]
             sorted_idx = np.argsort(imps)[::-1]
             ax_ = axesB[i_]
@@ -424,8 +399,7 @@ def main():
         else:
             axesC = axesC.flatten()
 
-        # compute base angles once
-        # #features depends on the shape of Xtemp
+        # compute base angles
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
                 Xtemp = Xtemp.drop(columns=[o_])
@@ -434,14 +408,13 @@ def main():
         base_angles = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
         i_ = 0
-        for m_ in classifiers.keys():
+        for m_ in method_names_cls:
             imps = method_importances[outcome_col][m_]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
             sorted_feats = feat_names_for_radial[sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            # angles
             angles = base_angles[:]
             angles += angles[:1]
 
@@ -455,23 +428,20 @@ def main():
             ax_.set_ylim(0, max(0, max(rep_imps)))
             ax_.set_title(m_, fontsize=10)
 
-            # minimal "repel": we'll pass angles (except last), label them
-            # We do angles[:-1] for the label angles
-            label_angles = angles[:-1]
-            # We'll call repel_labels
-            repel_labels(ax_, label_angles, sorted_feats)
+            # label them at angles
+            # no "repel" approach
 
         for j in range(i_, nrowsC*ncolsC):
             axesC[j].axis("off")
 
-        figC.suptitle(f"Radial Importances (Minimal Repel) - {outcome_col}")
+        figC.suptitle(f"Radial Importances - {outcome_col}")
         plt.tight_layout()
         plt.savefig(pdfC_path)
         plt.close(figC)
 
-    ##########################
-    # Do the same for regression radial
-    ##########################
+    ########################
+    # 7) Radial for regression
+    ########################
     for outcome_col in continuous_outcomes:
         reg_method_names = list(regressors.keys())
         pdfC_reg_path = os.path.join(output_dir, f"pdfC_{outcome_col}_regression.pdf")
@@ -485,7 +455,6 @@ def main():
         else:
             axesCreg = axesCreg.flatten()
 
-        # get the feature set
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
             if o_ != outcome_col and o_ in Xtemp.columns:
@@ -495,235 +464,201 @@ def main():
         base_angles_r = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
         i_ = 0
-        for regr_ in reg_method_names:
-            imps = method_importances[outcome_col][regr_]
+        for r_ in reg_method_names:
+            imps = method_importances[outcome_col][r_]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
             sorted_feats = feat_names_for_radial[sorted_idx]
 
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            sub_angles = base_angles_r[:]
-            sub_angles += sub_angles[:1]
+            angles = base_angles_r[:]
+            angles += angles[:1]
 
             ax_ = axesCreg[i_]
             i_ += 1
             the_color = 'gray'
-            ax_.plot(sub_angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
-            ax_.fill(sub_angles, rep_imps, alpha=0.25, color=the_color)
+            ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color=the_color)
+            ax_.fill(angles, rep_imps, alpha=0.25, color=the_color)
             ax_.set_theta_offset(math.pi/2)
             ax_.set_theta_direction(-1)
             ax_.set_ylim(0, max(0, max(rep_imps)))
-            ax_.set_title(regr_, fontsize=10)
-
-            # minimal repel
-            repel_labels(ax_, sub_angles[:-1], sorted_feats)
+            ax_.set_title(r_, fontsize=10)
 
         for j in range(i_, nrowsR*ncolsR):
             axesCreg[j].axis("off")
 
-        figCreg.suptitle(f"Radial Importances (Minimal Repel) - {outcome_col}")
+        figCreg.suptitle(f"Radial Importances - {outcome_col}")
         plt.tight_layout()
         plt.savefig(pdfC_reg_path)
         plt.close(figCreg)
 
-    ##########################
-    #  Heatmap D: unify scale across all methods
-    ##########################
-    # 1) find global min, max across all method importances (all outcomes)
-    globalD_min = 9999999.0
-    globalD_max = -9999999.0
-
+    ########################
+    # 8) pdfD => unify scale + actual names
+    ########################
+    # gather global min, max
+    global_minD = float('inf')
+    global_maxD = float('-inf')
     all_methods = list(classifiers.keys()) + list(regressors.keys())
+
     for method_name in all_methods:
         for out_ in all_outcomes:
             if method_name in method_importances[out_]:
                 arr_ = method_importances[out_][method_name]
                 if len(arr_):
-                    arr_min = min(arr_)
-                    arr_max = max(arr_)
-                    if arr_min < globalD_min:
-                        globalD_min = arr_min
-                    if arr_max > globalD_max:
-                        globalD_max = arr_max
+                    arr_min = np.min(arr_)
+                    arr_max = np.max(arr_)
+                    if arr_min < global_minD:
+                        global_minD = arr_min
+                    if arr_max > global_maxD:
+                        global_maxD = arr_max
 
-    # 2) produce pdfD with features as columns, outcomes as rows
-    # rotate feature names 90° at top
+    # For each method, we create a matrix row=outcomes, col=actual features (i.e. the union of features across data minus outcomes).
+    # We'll define 'all_feats' = data.drop(columns=all_outcomes).columns
+    all_feats = data.drop(columns=all_outcomes, errors='ignore').columns.tolist()
+    n_all_feats = len(all_feats)
+
     for method_name in all_methods:
-        # gather
-        applicable_outcomes = []
-        all_vals = []
-        max_features = 0
+        # find which outcomes used that method
+        used_outs = []
         for out_ in all_outcomes:
             if method_name in method_importances[out_]:
-                arr_ = method_importances[out_][method_name]
-                max_features = max(max_features, len(arr_))
-                all_vals.extend(arr_)
-                applicable_outcomes.append(out_)
+                used_outs.append(out_)
 
-        if not applicable_outcomes:
+        if not used_outs:
             continue
 
-        mat = np.zeros((len(applicable_outcomes), max_features))
-        row_labels = list(applicable_outcomes)
+        # build a matrix: shape=(len(used_outs), n_all_feats)
+        mat = np.zeros((len(used_outs), n_all_feats))
+        row_labels = used_outs
 
-        for i, out_ in enumerate(applicable_outcomes):
-            arr_ = method_importances[out_][method_name]
-            mat[i, :len(arr_)] = arr_
+        # fill each row
+        for i, out_ in enumerate(used_outs):
+            # we have an importance array (length is #features in X after dropping that outcome).
+            # we must align it with 'all_feats'. So we do:
+            Xtemp = data.drop(columns=[out_], errors='ignore')
+            for o_ in all_outcomes:
+                if o_ != out_ and o_ in Xtemp.columns:
+                    Xtemp = Xtemp.drop(columns=[o_], errors='ignore')
+            feats_for_out = list(Xtemp.columns)
+            imps_arr = method_importances[out_][method_name]
 
-        col_labels = [f"feat_{i}" for i in range(max_features)]
+            # map each 'feats_for_out[j]' to the index in 'all_feats' if present
+            for j, feat_j in enumerate(feats_for_out):
+                if feat_j in all_feats:
+                    col_idx = all_feats.index(feat_j)
+                    mat[i, col_idx] = imps_arr[j]
+
         pdfD_path = os.path.join(output_dir, f"pdfD_{method_name}.pdf")
-        plt.figure(figsize=(1.2*max_features, 1.2*len(applicable_outcomes)))
-        # unify scale = globalD_min, globalD_max
-        sns.heatmap(mat, annot=False, cmap='inferno',
-                    xticklabels=col_labels, yticklabels=row_labels,
-                    vmin=globalD_min, vmax=globalD_max)
+        plt.figure(figsize=(1.2*n_all_feats, 1.2*len(used_outs)))
+        sns.heatmap(
+            mat, annot=False, cmap='inferno',
+            xticklabels=all_feats, yticklabels=row_labels,
+            vmin=global_minD, vmax=global_maxD
+        )
         plt.xticks(rotation=90)
-        plt.title(f"Inferno Heatmap - {method_name} (Importances), Unif Scale")
+        plt.title(f"Inferno Heatmap - {method_name} (Importances) [Unif. Scale]")
         plt.xlabel("Features")
         plt.ylabel("Outcomes")
         plt.tight_layout()
         plt.savefig(pdfD_path)
         plt.close()
 
-    ##########################
-    #  Subset approach: "top best features" 
-    ##########################
-    # We'll do EXACTLY your approach, but at the end we re-run "the entire pipeline" with those subsets
-    # We'll store in 'subset' folder
+    ########################
+    # 9) Output regression metrics + final "best" feature retrieval
+    ########################
+    # minimal text file for regression
+    reg_metrics_file = os.path.join(output_dir, "regression_metrics_summary.txt")
+    with open(reg_metrics_file, "w") as f:
+        f.write("Regression Metrics (MSE, RMSE, MAE, R2)\n\n")
+        for out_ in continuous_outcomes:
+            f.write(f"Outcome: {out_}\n")
+            if out_ not in regression_metrics:
+                continue
+            for r_ in regressors.keys():
+                if r_ in regression_metrics[out_]:
+                    mse_val, rmse_val, mae_val, r2_val = regression_metrics[out_][r_]
+                    f.write(f"  {r_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
+            f.write("\n")
 
-    # We'll define a simple approach: topN=5, or cutoff=0.02
-    top_importance_cutoff = 0.02
-    subset_dir = os.path.join(output_dir, "subset")
-    os.makedirs(subset_dir, exist_ok=True)
+    # "best" features overall: pick best method for each outcome, gather top 5 or so
+    # or we can do a union of all features with importance > 0.02 for each best method?
+    # We'll do a simpler approach: pick best method => top 5 for that outcome => union them
+    top_cutoff = 0.02
+    best_features_union = set()
 
-    best_features_dict = {}
-
-    def pick_subset_features_importances(outcome_col, method_name):
-        # fetch importances
-        imps = method_importances[outcome_col][method_name]
-        # define Xtemp to get feat names
-        Xtemp = data.drop(columns=[outcome_col])
-        for o_ in all_outcomes:
-            if o_ != outcome_col and o_ in Xtemp.columns:
-                Xtemp = Xtemp.drop(columns=[o_])
-        feat_names = np.array(Xtemp.columns)
-        mask = (imps > top_importance_cutoff)
-        if not np.any(mask):
-            # fallback to single most important
-            top_idx = [np.argmax(imps)]
-        else:
-            top_idx = np.where(mask)[0]
-        return feat_names[top_idx].tolist()
-
-    # classification
-    for outcome_col in classification_outcomes:
-        best_method = None
+    # classification best methods
+    for out_ in classification_outcomes:
+        best_m = None
         best_val = -999
-        for m_ in classifiers.keys():
-            rec_ = recall_df.loc[outcome_col, m_]
+        for m_ in method_names_cls:
+            rec_ = recall_df.loc[out_, m_]
             if rec_ > best_val:
                 best_val = rec_
-                best_method = m_
-        if best_method:
-            feats_ = pick_subset_features_importances(outcome_col, best_method)
-            best_features_dict[outcome_col] = feats_
+                best_m = m_
+        if best_m:
+            # retrieve importances
+            Xtemp = data.drop(columns=[out_], errors='ignore')
+            for xo in all_outcomes:
+                if xo != out_ and xo in Xtemp.columns:
+                    Xtemp = Xtemp.drop(columns=[xo], errors='ignore')
+            feats = Xtemp.columns
+            imps = method_importances[out_][best_m]
 
-    # regression
-    def best_mse_method_for_outcome(out_):
-        # find minimal MSE in regression_metrics[out_]
-        min_mse = 9999999
+            # find which feats pass top_cutoff
+            mask = (imps > top_cutoff)
+            if not np.any(mask):
+                top_idx = [np.argmax(imps)]
+            else:
+                top_idx = np.where(mask)[0]
+            for idx_ in top_idx:
+                best_features_union.add(feats[idx_])
+
+    # regression best methods
+    def best_mse_method(out_):
         best_m = None
+        best_mse = float('inf')
         if out_ in regression_metrics:
-            for regr_ in regressors.keys():
-                if regr_ in regression_metrics[out_]:
-                    (mse_val, rmse_val, mae_val, r2_val) = regression_metrics[out_][regr_]
-                    if mse_val < min_mse:
-                        min_mse = mse_val
-                        best_m = regr_
+            for r_ in regressors.keys():
+                if r_ in regression_metrics[out_]:
+                    (mse_val, rmse_val, mae_val, r2_val) = regression_metrics[out_][r_]
+                    if mse_val < best_mse:
+                        best_mse = mse_val
+                        best_m = r_
         return best_m
 
-    for outcome_col in continuous_outcomes:
-        best_m = best_mse_method_for_outcome(outcome_col)
-        if best_m:
-            feats_ = pick_subset_features_importances(outcome_col, best_m)
-            best_features_dict[outcome_col] = feats_
+    for out_ in continuous_outcomes:
+        bm_ = best_mse_method(out_)
+        if bm_:
+            Xtemp = data.drop(columns=[out_], errors='ignore')
+            for xo in all_outcomes:
+                if xo != out_ and xo in Xtemp.columns:
+                    Xtemp = Xtemp.drop(columns=[xo], errors='ignore')
+            feats = Xtemp.columns
+            imps = method_importances[out_][bm_]
 
-    # We'll define a helper to re-run "entire pipeline" but only for these outcomes
-    def re_run_pipeline_subset(data, outcome_col, feats, outdir):
-        """
-        We'll store some minimal info to screen and log, e.g. classification confusion or regression metrics.
-        """
-        # build smaller data
-        subset_cols = feats + [outcome_col]
-        if len(subset_cols) != len(set(subset_cols)):
-            # ensure no duplicates
-            subset_cols = list(set(subset_cols))
-        sub_data = data[subset_cols].copy()
-
-        # check classification or continuous
-        is_cont = (outcome_col in continuous_outcomes)
-
-        print(f"[SUBSET] Re-running pipeline for {outcome_col}, feats={feats}")
-        with open(os.path.join(outdir, f"subset_{outcome_col}_log.txt"), "w") as f_:
-            if not is_cont:
-                # classification
-                X = sub_data.drop(columns=[outcome_col])
-                y = sub_data[outcome_col].copy()
-                for c_ in X.columns:
-                    if X[c_].dtype == 'object':
-                        X[c_] = LabelEncoder().fit_transform(X[c_].astype(str))
-                try:
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=0.2, stratify=y, random_state=999
-                    )
-                except:
-                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=999)
-                sc_ = StandardScaler()
-                X_train = sc_.fit_transform(X_train)
-                X_test = sc_.transform(X_test)
-
-                # evaluate each classifier
-                f_.write(f"[SUBSET] Classification for {outcome_col}, feats={feats}\n\n")
-                for m_ in classifiers.keys():
-                    clf_ = classifiers[m_]
-                    clf_.fit(X_train, y_train)
-                    y_pred = clf_.predict(X_test)
-                    rec_ = recall_score(y_test, y_pred, average='macro')
-                    f_.write(f"{m_}: recall={rec_:.2f}\n")
-
+            mask = (imps > top_cutoff)
+            if not np.any(mask):
+                top_idx = [np.argmax(imps)]
             else:
-                # regression
-                X = sub_data.drop(columns=[outcome_col])
-                y = sub_data[outcome_col].copy()
-                for c_ in X.columns:
-                    if X[c_].dtype == 'object':
-                        X[c_] = LabelEncoder().fit_transform(X[c_].astype(str))
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=999)
-                sc_ = StandardScaler()
-                X_train = sc_.fit_transform(X_train)
-                X_test = sc_.transform(X_test)
+                top_idx = np.where(mask)[0]
+            for idx_ in top_idx:
+                best_features_union.add(feats[idx_])
 
-                f_.write(f"[SUBSET] Regression for {outcome_col}, feats={feats}\n\n")
-                for regr_ in regressors.keys():
-                    model_ = regressors[regr_]
-                    model_.fit(X_train, y_train)
-                    y_pred = model_.predict(X_test)
-                    mse_val = mean_squared_error(y_test, y_pred)
-                    rmse_val = math.sqrt(mse_val)
-                    mae_val = mean_absolute_error(y_test, y_pred)
-                    r2_val = r2_score(y_test, y_pred)
-                    f_.write(f"{regr_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
+    # best_features_union now has all selected features
+    # final "subset" of the input dataframe with these best features
+    # plus we keep the original outcomes
+    final_subset_cols = list(best_features_union) + all_outcomes
+    final_subset_cols = list(dict.fromkeys(final_subset_cols))  # remove duplicates if any
 
-    # finally we run the subset pipeline for each outcome
-    subset_out = os.path.join(output_dir, "subset")
-    os.makedirs(subset_out, exist_ok=True)
-    for out_ in all_outcomes:
-        if out_ in best_features_dict:
-            sub_feats = best_features_dict[out_]
-            re_run_pipeline_subset(data, out_, sub_feats, subset_out)
+    # We'll produce a DataFrame
+    final_subset_df = data[final_subset_cols].copy()
+    # optional: save to CSV
+    subset_csv_path = os.path.join(output_dir, "best_features_overall_subset.csv")
+    final_subset_df.to_csv(subset_csv_path, sep=';', index=True)
 
-    print("\n[INFO] Done with the entire pipeline, using default confusion-colors, minimal label repel in radial,")
-    print("[INFO] unified scale in pdfD, and repeated subset pipeline in 'subset/' folder. Enjoy!")
+    print(f"\n[INFO] Done! We used pale confusion matrices ('light:blue'), removed repel,")
+    print(f"[INFO] used actual feature names in plotD, removed the subset pipeline re-run,")
+    print(f"[INFO] and wrote the best-features overall subset to: {subset_csv_path}")
 
 
 if __name__ == "__main__":

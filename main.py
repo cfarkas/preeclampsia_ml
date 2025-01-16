@@ -69,7 +69,7 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
-    f1_score,
+    recall_score,
     confusion_matrix,
     mean_squared_error,
     r2_score,
@@ -200,8 +200,8 @@ def main():
     method_names_cls = list(classifiers.keys())
     method_names_reg = list(regressors.keys())
 
-    # Store classification f1, regression metrics
-    f1_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names_cls)
+    # Store classification recall, regression metrics
+    recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names_cls)
     regression_metrics = {}
 
     method_importances = {out: {} for out in all_outcomes}
@@ -242,8 +242,8 @@ def main():
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
-            rec_ = f1_score(y_test, y_pred, average='macro')
-            f1_df.loc[outcome_col, m_] = rec_
+            rec_ = recall_score(y_test, y_pred, average='macro')
+            recall_df.loc[outcome_col, m_] = rec_
 
             conf_ = confusion_matrix(y_test, y_pred)
             method_conf_matrices[outcome_col][m_] = conf_
@@ -581,7 +581,7 @@ def main():
         best_m = None
         best_score = -999
         for m_ in method_names_cls:
-            val = f1_df.loc[outcome, m_]
+            val = recall_df.loc[outcome, m_]
             if val > best_score:
                 best_score = val
                 best_m = m_
@@ -643,16 +643,16 @@ def main():
     subset_csv_path = os.path.join(output_dir, "best_features_overall_subset.csv")
     final_subset_df.to_csv(subset_csv_path, sep=';', index=True)
 
-    print("\n[INFO] Generating unified f1 score heatmap across classification outcomes & methods...")
-    f1_heatmap_path = os.path.join(output_dir, "f1_scores_heatmap.pdf")
+    print("\n[INFO] Generating unified recall score heatmap across classification outcomes & methods...")
+    recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names_cls), 1.2*len(classification_outcomes)))
-    class_f1_df = f1_df.loc[classification_outcomes, method_names_cls]
-    sns.heatmap(class_f1_df, annot=True, cmap='cividis', fmt=".2f")
-    plt.title("f1 Scores Heatmap (Classification Outcomes vs. Methods)")
+    class_recall_df = recall_df.loc[classification_outcomes, method_names_cls]
+    sns.heatmap(class_recall_df, annot=True, cmap='cividis', fmt=".2f")
+    plt.title("recall Scores Heatmap (Classification Outcomes vs. Methods)")
     plt.xlabel("Methods")
     plt.ylabel("Outcomes")
     plt.tight_layout()
-    plt.savefig(f1_heatmap_path)
+    plt.savefig(recall_heatmap_path)
     plt.close()
 
     print("\n[INFO] Done! Confusion matrix colored white->darkblue (Blues), radial plots colored darkviolet.\n")

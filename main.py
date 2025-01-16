@@ -182,19 +182,19 @@ def main():
 
     # classifiers & regressors
     classifiers = {
-        "LogisticRegression": LogisticRegression(random_state=0, solver='newton-cholesky', max_iter=100),
+        "LogisticRegression": LogisticRegression(random_state=7, solver='newton-cholesky', max_iter=100),
         "LinearDiscriminantAnalysis": LinearDiscriminantAnalysis(),
         "GaussianNB": GaussianNB(),
         "K-Nearest Neighbors": KNeighborsClassifier(n_neighbors=5),
-        "Decision Tree": DecisionTreeClassifier(random_state=0),
-        "Random Forest": RandomForestClassifier(bootstrap=False, random_state=0),
-        "GradientBoosting": GradientBoostingClassifier(max_depth=5, random_state=0),
-        "SVM": SVC(probability=True, random_state=0),
-        "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=0)
+        "Decision Tree": DecisionTreeClassifier(random_state=7),
+        "Random Forest": RandomForestClassifier(bootstrap=False, random_state=7),
+        "GradientBoosting": GradientBoostingClassifier(max_depth=5, random_state=7),
+        "SVM": SVC(probability=True, random_state=7),
+        "MLP": MLPClassifier(hidden_layer_sizes=(100,), max_iter=300, random_state=7)
     }
     regressors = {
-        "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=0),
-        "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=0)
+        "RandomForestRegressor": RandomForestRegressor(n_estimators=100, random_state=7),
+        "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100, random_state=7)
     }
 
     method_names_cls = list(classifiers.keys())
@@ -225,11 +225,11 @@ def main():
 
         try:
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=0, stratify=y
+                X, y, test_size=0.2, random_state=7, stratify=y
             )
         except ValueError:
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=0
+                X, y, test_size=0.2, random_state=7
             )
 
         sc_ = StandardScaler()
@@ -250,7 +250,7 @@ def main():
 
             try:
                 perm_res = permutation_importance(
-                    clf, X_test, y_test, n_repeats=5, random_state=0, n_jobs=-1
+                    clf, X_test, y_test, n_repeats=5, random_state=7, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
             except:
@@ -274,7 +274,7 @@ def main():
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=0
+            X, y, test_size=0.2, random_state=7
         )
         sc_ = StandardScaler()
         X_train = sc_.fit_transform(X_train)
@@ -296,7 +296,7 @@ def main():
 
             try:
                 perm_res = permutation_importance(
-                    model_, X_test, y_test, n_repeats=5, random_state=0, n_jobs=-1
+                    model_, X_test, y_test, n_repeats=5, random_state=7, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
             except:

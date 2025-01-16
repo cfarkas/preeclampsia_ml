@@ -836,3 +836,6 @@ def main():
           f"For continuous outcomes, separate regression approach with MSE, R2, RMSE, MAE.\n"
           f"Finally 'pdfD_<method>.pdf' => inferno heatmap.\n"
           f"Subset approach uses an importance cutoff = 0.02, re-run pipeline => in subfolder 'subset', with metrics.\n")
+    
+if __name__ == "__main__":
+    main()

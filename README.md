@@ -14,6 +14,9 @@ python3 ml_pipeline.py --install_conda
 
 # Run (output in current directory)
 python3 ml_pipeline.py --input mydataframe.csv --output ./
+
+# Test
+python3 ml_pipeline.py --input ./example/dataframe.csv --output ./example/test_run/
 ```
 
 #### This pipeline systematically tests multiple outcomes from a given dataset as follows:

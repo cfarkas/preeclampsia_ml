@@ -60,7 +60,7 @@ import argparse
 import math
 
 import pandas as pd
-import numpy as np                      # >>> already present but required for logging
+import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -107,13 +107,13 @@ def parse_arguments():
     parser.add_argument(
         "--install_conda",
         action="store_true",
-        help="If set, create/check the ml_preeclampsia environment, then re-invoke script inside it."
+        help="If set, create/check the ml_preeclampsia environment, then re‑invoke script inside it."
     )
     parser.add_argument(
         "--input",
         type=str,
         default=None,
-        help="Path to input CSV file (with ';' delimiter and 'id' index col)."
+        help="Path to input CSV file (semicolon‑delimited)."
     )
     parser.add_argument(
         "--output",
@@ -130,12 +130,12 @@ def main():
         create_conda_env_if_needed(ENV_NAME)
         if args.input and args.output:
             new_args = [__file__, "--input", args.input, "--output", args.output]
-            print(f"[INFO] Re-invoking script in '{ENV_NAME}' with: {new_args}")
+            print(f"[INFO] Re‑invoking script in '{ENV_NAME}' with: {new_args}")
             cmd = ["conda", "run", "-n", ENV_NAME, "python"] + new_args
             try:
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
-                print(f"[ERROR] Re-run in environment '{ENV_NAME}' failed: {e}")
+                print(f"[ERROR] Re‑run in environment '{ENV_NAME}' failed: {e}")
                 sys.exit(1)
         else:
             print("[INFO] Environment creation done; no pipeline run.")
@@ -152,10 +152,17 @@ def main():
     ########################
     # 1) Load Data + correlation
     ########################
-    data = pd.read_csv(input_csv, delimiter=';', index_col='id')
+    # >>> NEW flexible loader: works with or without an 'id' column
+    try:
+        data = pd.read_csv(input_csv, delimiter=';', index_col='id')
+    except ValueError:
+        data = pd.read_csv(input_csv, delimiter=';')
+        if data.columns[0].startswith('Unnamed'):
+            data = data.drop(columns=data.columns[0])
+        if data.index.name is None:
+            data.index.name = "index"
 
-    corr_matrix = data.corr()
-    # >>> Fewer inches because DPI is now 300
+    corr_matrix = data.corr(numeric_only=True)
     plt.figure(figsize=(18, 14))
     ax = sns.heatmap(
         corr_matrix, annot=True, cmap='seismic', fmt='.2f',
@@ -207,7 +214,6 @@ def main():
     method_names_cls = list(classifiers.keys())
     method_names_reg = list(regressors.keys())
 
-    # Store classification recall, regression metrics
     recall_df = pd.DataFrame(0.0, index=all_outcomes, columns=method_names_cls)
     regression_metrics = {}
 
@@ -221,11 +227,9 @@ def main():
         X = data.drop(columns=[outcome_col])
         others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
-            if o_ in X.columns:
-                X = X.drop(columns=[o_])
+            X = X.drop(columns=o_, errors='ignore')
         y = data[outcome_col].copy()
 
-        # encode
         for c in X.columns:
             if X[c].dtype == 'object':
                 X[c] = LabelEncoder().fit_transform(X[c].astype(str))
@@ -239,7 +243,7 @@ def main():
                 X, y, test_size=0.2, random_state=7
             )
 
-        # >>> LOG CLASS BALANCE OF THE SPLIT
+        # >>> LOG CLASS BALANCE
         train_pos = int(np.sum(y_train == 1))
         train_neg = len(y_train) - train_pos
         test_pos  = int(np.sum(y_test == 1))
@@ -263,7 +267,7 @@ def main():
             conf_ = confusion_matrix(y_test, y_pred)
             method_conf_matrices[outcome_col][m_] = conf_
 
-            # >>> SAVE RAW CONFUSION MATRIX AS CSV
+            # >>> SAVE RAW CONFUSION MATRIX
             np.savetxt(
                 os.path.join(output_dir, f"confmat_{outcome_col}_{m_.replace(' ', '_')}.csv"),
                 conf_, delimiter=';', fmt='%d')
@@ -285,8 +289,7 @@ def main():
         X = data.drop(columns=[outcome_col])
         others = [o for o in all_outcomes if o != outcome_col]
         for o_ in others:
-            if o_ in X.columns:
-                X = X.drop(columns=[o_])
+            X = X.drop(columns=o_, errors='ignore')
         y = data[outcome_col].copy()
 
         for c in X.columns:
@@ -297,9 +300,9 @@ def main():
             X, y, test_size=0.2, random_state=7
         )
 
-        # >>> LOG REGRESSION SPLIT SIZE (positives not defined)
+        # >>> LOG REGRESSION SPLIT SIZE
         with open(os.path.join(output_dir, "split_log.txt"), "a") as lf:
-            lf.write(f"{outcome_col},{len(y_train)},{0},{len(y_test)},{0}\n")
+            lf.write(f"{outcome_col},{len(y_train)},0,{len(y_test)},0\n")
 
         sc_ = StandardScaler()
         X_train = sc_.fit_transform(X_train)
@@ -330,7 +333,7 @@ def main():
             method_importances[outcome_col][r_] = importances
 
     ########################
-    # 5) Confusion matrix plots with plasma
+    # 5) Confusion matrix plots
     ########################
     def decide_layout(n):
         if n <= 4:
@@ -346,14 +349,13 @@ def main():
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
         n_methods = len(method_names_cls)
         nrows, ncols = decide_layout(n_methods)
-        # >>> slightly smaller canvas; DPI rise keeps clarity
         figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4*ncols, 3*nrows))
         if nrows*ncols == 1:
             axesA = [axesA]
         else:
             axesA = axesA.flatten()
 
-        white_to_darkblue = plt.cm.Blues  # white → dark blue
+        white_to_darkblue = plt.cm.Blues
 
         i_ = 0
         for m_ in method_names_cls:
@@ -374,13 +376,12 @@ def main():
         plt.close(figA)
 
     ########################
-    # 6) Bar plots, radial, etc. for classification
+    # 6) Bar plots & radial plots for classification
     ########################
     for outcome_col in classification_outcomes:
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
         n_methods = len(method_names_cls)
         nrowsB, ncolsB = decide_layout(n_methods)
-        # >>> smaller figure
         figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(4.5*ncolsB, 4.5*nrowsB))
         if nrowsB*ncolsB == 1:
             axesB = [axesB]
@@ -389,8 +390,8 @@ def main():
 
         Xtemp = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
-            if o_ != outcome_col and o_ in Xtemp.columns:
-                Xtemp = Xtemp.drop(columns=[o_])
+            if o_ != outcome_col:
+                Xtemp = Xtemp.drop(columns=o_, errors='ignore')
         feat_names = np.array(Xtemp.columns)
 
         i_ = 0
@@ -413,7 +414,7 @@ def main():
         plt.savefig(pdfB_path)
         plt.close(figB)
 
-        # radial
+        # radial plots
         pdfC_path = os.path.join(output_dir, f"pdfC_{outcome_col}.pdf")
         nrowsC, ncolsC = decide_layout(n_methods)
         figC, axesC = plt.subplots(nrows=nrowsC, ncols=ncolsC,
@@ -426,8 +427,8 @@ def main():
 
         Xtemp2 = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
-            if o_ != outcome_col and o_ in Xtemp2.columns:
-                Xtemp2 = Xtemp2.drop(columns=[o_])
+            if o_ != outcome_col:
+                Xtemp2 = Xtemp2.drop(columns=o_, errors='ignore')
         feat_names_for_radial = np.array(Xtemp2.columns)
         n_feat = len(feat_names_for_radial)
         base_angles = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
@@ -464,7 +465,7 @@ def main():
         plt.close(figC)
 
     ########################
-    # 7) Radial for regression
+    # 7) Radial plots for regression
     ########################
     for outcome_col in continuous_outcomes:
         reg_method_names = list(regressors.keys())
@@ -481,8 +482,8 @@ def main():
 
         XtempR = data.drop(columns=[outcome_col])
         for o_ in all_outcomes:
-            if o_ != outcome_col and o_ in XtempR.columns:
-                XtempR = XtempR.drop(columns=[o_])
+            if o_ != outcome_col:
+                XtempR = XtempR.drop(columns=o_, errors='ignore')
         feat_names_for_radial = np.array(XtempR.columns)
         n_feat = len(feat_names_for_radial)
         base_angles_r = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
@@ -519,7 +520,7 @@ def main():
         plt.close(figCreg)
 
     ########################
-    # 8) pdfD => unify scale + actual names, use bbox_inches
+    # 8) pdfD heat‑maps across outcomes & features
     ########################
     global_minD = float('inf')
     global_maxD = float('-inf')
@@ -530,50 +531,38 @@ def main():
             if method_name in method_importances[out_]:
                 arr_ = method_importances[out_][method_name]
                 if len(arr_):
-                    arr_min = np.min(arr_)
-                    arr_max = np.max(arr_)
-                    if arr_min < global_minD:
-                        global_minD = arr_min
-                    if arr_max > global_maxD:
-                        global_maxD = arr_max
+                    global_minD = min(global_minD, np.min(arr_))
+                    global_maxD = max(global_maxD, np.max(arr_))
 
     all_feats = data.drop(columns=all_outcomes, errors='ignore').columns.tolist()
     n_all_feats = len(all_feats)
 
     for method_name in all_methods:
-        used_outs = []
-        for out_ in all_outcomes:
-            if method_name in method_importances[out_]:
-                used_outs.append(out_)
-
+        used_outs = [out_ for out_ in all_outcomes if method_name in method_importances[out_]]
         if not used_outs:
             continue
 
         mat = np.zeros((len(used_outs), n_all_feats))
-        row_labels = used_outs
-
         for i, out_ in enumerate(used_outs):
             XtempD = data.drop(columns=[out_], errors='ignore')
             for xo in all_outcomes:
-                if xo != out_ and xo in XtempD.columns:
-                    XtempD = XtempD.drop(columns=[xo], errors='ignore')
+                if xo != out_:
+                    XtempD = XtempD.drop(columns=xo, errors='ignore')
             feats_for_out = list(XtempD.columns)
             imps_arr = method_importances[out_][method_name]
-
             for j, feat_j in enumerate(feats_for_out):
                 if feat_j in all_feats:
-                    col_idx = all_feats.index(feat_j)
-                    mat[i, col_idx] = imps_arr[j]
+                    mat[i, all_feats.index(feat_j)] = imps_arr[j]
 
         pdfD_path = os.path.join(output_dir, f"pdfD_{method_name.replace(' ', '_')}.pdf")
         plt.figure(figsize=(1.2*n_all_feats, 1.2*len(used_outs)))
         sns.heatmap(
             mat, annot=False, cmap='inferno',
-            xticklabels=all_feats, yticklabels=row_labels,
+            xticklabels=all_feats, yticklabels=used_outs,
             vmin=global_minD, vmax=global_maxD
         )
         plt.xticks(rotation=90)
-        plt.title(f"Inferno Heatmap - {method_name} (Importances) [Unif. Scale]")
+        plt.title(f"Inferno Heatmap - {method_name} (Importances) [Unified Scale]")
         plt.xlabel("Features")
         plt.ylabel("Outcomes")
         plt.tight_layout()
@@ -581,15 +570,13 @@ def main():
         plt.close()
 
     ########################
-    # 9) Output regression metrics
+    # 9) Save regression metrics
     ########################
     reg_metrics_file = os.path.join(output_dir, "regression_metrics_summary.txt")
     with open(reg_metrics_file, "w") as f:
         f.write("Regression Metrics (MSE, RMSE, MAE, R2)\n\n")
         for out_ in continuous_outcomes:
             f.write(f"Outcome: {out_}\n")
-            if out_ not in regression_metrics:
-                continue
             for r_ in method_names_reg:
                 if r_ in regression_metrics[out_]:
                     mse_val, rmse_val, mae_val, r2_val = regression_metrics[out_][r_]
@@ -597,28 +584,23 @@ def main():
             f.write("\n")
 
     ########################
-    # Subset CSV: pick best method for each outcome, get top features, unify
+    # 10) Generate best‑feature subset
     ########################
     def pick_best_method_classification(outcome):
-        best_m = None
-        best_score = -999
+        best_m, best_score = None, -999
         for m_ in method_names_cls:
-            val = recall_df.loc[outcome, m_]
-            if val > best_score:
-                best_score = val
-                best_m = m_
+            score = recall_df.loc[outcome, m_]
+            if score > best_score:
+                best_m, best_score = m_, score
         return best_m
 
     def pick_best_method_regression(outcome):
-        best_m = None
-        best_mse = float('inf')
-        if outcome in regression_metrics:
-            for r_ in method_names_reg:
-                if r_ in regression_metrics[outcome]:
-                    (mse_, rmse_, mae_, r2_) = regression_metrics[outcome][r_]
-                    if mse_ < best_mse:
-                        best_mse = mse_
-                        best_m = r_
+        best_m, best_mse = None, float('inf')
+        for r_ in method_names_reg:
+            if r_ in regression_metrics[outcome]:
+                mse_val = regression_metrics[outcome][r_][0]
+                if mse_val < best_mse:
+                    best_m, best_mse = r_, mse_val
         return best_m
 
     top_cutoff = 0.02
@@ -627,57 +609,47 @@ def main():
     for out_ in classification_outcomes:
         bm_ = pick_best_method_classification(out_)
         if bm_:
-            Xtemp_ = data.drop(columns=[out_], errors='ignore')
-            for xo in all_outcomes:
-                if xo != out_ and xo in Xtemp_.columns:
-                    Xtemp_ = Xtemp_.drop(columns=[xo], errors='ignore')
-            feats_ = list(Xtemp_.columns)
+            Xtmp = data.drop(columns=all_outcomes, errors='ignore')
+            feats_ = list(Xtmp.columns)
             imps_ = method_importances[out_][bm_]
-            mask = (imps_ > top_cutoff)
-            if not np.any(mask):
-                top_idx = [int(np.argmax(imps_))]
-            else:
-                top_idx = list(np.where(mask)[0])
-            for idx_ in top_idx:
-                best_feat_union.add(feats_[idx_])
+            mask = imps_ > top_cutoff
+            idxs = np.where(mask)[0] if np.any(mask) else [int(np.argmax(imps_))]
+            best_feat_union.update([feats_[i] for i in idxs])
 
     for out_ in continuous_outcomes:
         bm_ = pick_best_method_regression(out_)
         if bm_:
-            Xtemp_ = data.drop(columns=[out_], errors='ignore')
-            for xo in all_outcomes:
-                if xo != out_ and xo in Xtemp_.columns:
-                    Xtemp_ = Xtemp_.drop(columns=[xo], errors='ignore')
-            feats_ = list(Xtemp_.columns)
+            Xtmp = data.drop(columns=all_outcomes, errors='ignore')
+            feats_ = list(Xtmp.columns)
             imps_ = method_importances[out_][bm_]
-            mask = (imps_ > top_cutoff)
-            if not np.any(mask):
-                top_idx = [int(np.argmax(imps_))]
-            else:
-                top_idx = list(np.where(mask)[0])
-            for idx_ in top_idx:
-                best_feat_union.add(feats_[idx_])
+            mask = imps_ > top_cutoff
+            idxs = np.where(mask)[0] if np.any(mask) else [int(np.argmax(imps_))]
+            best_feat_union.update([feats_[i] for i in idxs])
 
     final_subset_cols = list(best_feat_union) + all_outcomes
-    final_subset_cols = list(dict.fromkeys(final_subset_cols))
-
     final_subset_df = data[final_subset_cols].copy()
-    subset_csv_path = os.path.join(output_dir, "best_features_overall_subset.csv")
-    final_subset_df.to_csv(subset_csv_path, sep=';', index=True)
+    final_subset_df.to_csv(os.path.join(output_dir, "best_features_overall_subset.csv"),
+                           sep=';', index=True)
 
-    print("\n[INFO] Generating unified recall score heatmap across classification outcomes & methods...")
+    ########################
+    # 11) Recall heat‑map
+    ########################
+    print("\n[INFO] Generating recall‑score heat‑map…")
     recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names_cls), 1.2*len(classification_outcomes)))
-    class_recall_df = recall_df.loc[classification_outcomes, method_names_cls]
-    sns.heatmap(class_recall_df, annot=True, cmap='cividis', fmt=".2f")
-    plt.title("recall Scores Heatmap (Classification Outcomes vs. Methods)")
+    sns.heatmap(recall_df.loc[classification_outcomes, method_names_cls],
+                annot=True, cmap='cividis', fmt=".2f")
+    plt.title("Recall Scores Heat‑Map (Classification Outcomes × Methods)")
     plt.xlabel("Methods")
     plt.ylabel("Outcomes")
     plt.tight_layout()
     plt.savefig(recall_heatmap_path)
     plt.close()
 
-    print("\n[INFO] Done! Confusion matrix coloured white→dark‑blue, radial plots coloured dark‑violet, fonts enlarged, log and CSV outputs added.\n")
+    print("\n[INFO] Pipeline completed successfully.\n"
+          "      • split_log.txt records training/test class balance\n"
+          "      • confmat_*.csv files store every raw confusion matrix\n"
+          "      • figures now have enlarged fonts and sharp 300 DPI rendering\n")
 
 if __name__ == "__main__":
     main()

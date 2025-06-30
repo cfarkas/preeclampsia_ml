@@ -60,7 +60,7 @@ import argparse
 import math
 
 import pandas as pd
-import numpy as np
+import numpy as np                      # >>> already present but required for logging
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -90,6 +90,12 @@ from sklearn.ensemble import (
 )
 from sklearn.svm import SVC
 from sklearn.inspection import permutation_importance
+
+# >>> GLOBAL STYLE TWEAKS — crisp text & bigger fonts everywhere
+plt.rcParams["figure.dpi"]   = 300
+plt.rcParams["font.size"]    = 14
+plt.rcParams["axes.titlesize"] = 16
+plt.rcParams["axes.labelsize"] = 16
 
 ###############################################################################
 # Argument Parsing
@@ -149,7 +155,8 @@ def main():
     data = pd.read_csv(input_csv, delimiter=';', index_col='id')
 
     corr_matrix = data.corr()
-    plt.figure(figsize=(30, 24))
+    # >>> Fewer inches because DPI is now 300
+    plt.figure(figsize=(18, 14))
     ax = sns.heatmap(
         corr_matrix, annot=True, cmap='seismic', fmt='.2f',
         annot_kws={"size":12}, linewidths=0.5, linecolor='white',
@@ -232,6 +239,14 @@ def main():
                 X, y, test_size=0.2, random_state=7
             )
 
+        # >>> LOG CLASS BALANCE OF THE SPLIT
+        train_pos = int(np.sum(y_train == 1))
+        train_neg = len(y_train) - train_pos
+        test_pos  = int(np.sum(y_test == 1))
+        test_neg  = len(y_test) - test_pos
+        with open(os.path.join(output_dir, "split_log.txt"), "a") as lf:
+            lf.write(f"{outcome_col},{train_pos},{train_neg},{test_pos},{test_neg}\n")
+
         sc_ = StandardScaler()
         X_train = sc_.fit_transform(X_train)
         X_test = sc_.transform(X_test)
@@ -248,12 +263,17 @@ def main():
             conf_ = confusion_matrix(y_test, y_pred)
             method_conf_matrices[outcome_col][m_] = conf_
 
+            # >>> SAVE RAW CONFUSION MATRIX AS CSV
+            np.savetxt(
+                os.path.join(output_dir, f"confmat_{outcome_col}_{m_.replace(' ', '_')}.csv"),
+                conf_, delimiter=';', fmt='%d')
+
             try:
                 perm_res = permutation_importance(
                     clf, X_test, y_test, n_repeats=5, random_state=7, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
-            except:
+            except Exception:
                 importances = np.zeros(len(feat_names))
 
             method_importances[outcome_col][m_] = importances
@@ -276,6 +296,11 @@ def main():
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=7
         )
+
+        # >>> LOG REGRESSION SPLIT SIZE (positives not defined)
+        with open(os.path.join(output_dir, "split_log.txt"), "a") as lf:
+            lf.write(f"{outcome_col},{len(y_train)},{0},{len(y_test)},{0}\n")
+
         sc_ = StandardScaler()
         X_train = sc_.fit_transform(X_train)
         X_test = sc_.transform(X_test)
@@ -299,7 +324,7 @@ def main():
                     model_, X_test, y_test, n_repeats=5, random_state=7, n_jobs=-1
                 )
                 importances = perm_res.importances_mean
-            except:
+            except Exception:
                 importances = np.zeros(len(feat_names))
 
             method_importances[outcome_col][r_] = importances
@@ -321,23 +346,21 @@ def main():
         pdfA_path = os.path.join(output_dir, f"pdfA_{outcome_col}.pdf")
         n_methods = len(method_names_cls)
         nrows, ncols = decide_layout(n_methods)
-        figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 4*nrows))
+        # >>> slightly smaller canvas; DPI rise keeps clarity
+        figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4*ncols, 3*nrows))
         if nrows*ncols == 1:
             axesA = [axesA]
         else:
             axesA = axesA.flatten()
 
-        # CHANGED: Instead of 'plasma', use white->darkblue (plt.cm.Blues)
-        # plasma_cmap = plt.get_cmap("plasma")
-        white_to_darkblue = plt.cm.Blues  # from white to dark blue
+        white_to_darkblue = plt.cm.Blues  # white → dark blue
 
         i_ = 0
         for m_ in method_names_cls:
             conf_ = method_conf_matrices[outcome_col][m_]
             ax_ = axesA[i_]
             i_ += 1
-            # sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=plasma_cmap)
-            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=white_to_darkblue)  # changed
+            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=white_to_darkblue)
             ax_.set_title(m_, fontsize=10)
             ax_.set_xlabel("Predicted")
             ax_.set_ylabel("Actual")
@@ -357,7 +380,8 @@ def main():
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
         n_methods = len(method_names_cls)
         nrowsB, ncolsB = decide_layout(n_methods)
-        figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(6*ncolsB, 6*nrowsB))
+        # >>> smaller figure
+        figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(4.5*ncolsB, 4.5*nrowsB))
         if nrowsB*ncolsB == 1:
             axesB = [axesB]
         else:
@@ -421,7 +445,6 @@ def main():
 
             ax_ = axesC[i_]
             i_ += 1
-            # CHANGED: color='darkviolet' instead of 'gray'
             ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color='darkviolet')
             ax_.fill(angles, rep_imps, alpha=0.25, color='darkviolet')
             ax_.set_theta_offset(math.pi/2)
@@ -477,7 +500,6 @@ def main():
 
             ax_ = axesCreg[i_]
             i_ += 1
-            # CHANGED: color='darkviolet' instead of 'gray'
             ax_.plot(angles_r, rep_imps, linewidth=2, linestyle='solid', color='darkviolet')
             ax_.fill(angles_r, rep_imps, alpha=0.25, color='darkviolet')
             ax_.set_theta_offset(math.pi/2)
@@ -543,7 +565,7 @@ def main():
                     col_idx = all_feats.index(feat_j)
                     mat[i, col_idx] = imps_arr[j]
 
-        pdfD_path = os.path.join(output_dir, f"pdfD_{method_name}.pdf")
+        pdfD_path = os.path.join(output_dir, f"pdfD_{method_name.replace(' ', '_')}.pdf")
         plt.figure(figsize=(1.2*n_all_feats, 1.2*len(used_outs)))
         sns.heatmap(
             mat, annot=False, cmap='inferno',
@@ -613,9 +635,9 @@ def main():
             imps_ = method_importances[out_][bm_]
             mask = (imps_ > top_cutoff)
             if not np.any(mask):
-                top_idx = [np.argmax(imps_)]
+                top_idx = [int(np.argmax(imps_))]
             else:
-                top_idx = np.where(mask)[0]
+                top_idx = list(np.where(mask)[0])
             for idx_ in top_idx:
                 best_feat_union.add(feats_[idx_])
 
@@ -630,9 +652,9 @@ def main():
             imps_ = method_importances[out_][bm_]
             mask = (imps_ > top_cutoff)
             if not np.any(mask):
-                top_idx = [np.argmax(imps_)]
+                top_idx = [int(np.argmax(imps_))]
             else:
-                top_idx = np.where(mask)[0]
+                top_idx = list(np.where(mask)[0])
             for idx_ in top_idx:
                 best_feat_union.add(feats_[idx_])
 
@@ -655,7 +677,7 @@ def main():
     plt.savefig(recall_heatmap_path)
     plt.close()
 
-    print("\n[INFO] Done! Confusion matrix colored white->darkblue (Blues), radial plots colored darkviolet.\n")
+    print("\n[INFO] Done! Confusion matrix coloured white→dark‑blue, radial plots coloured dark‑violet, fonts enlarged, log and CSV outputs added.\n")
 
 if __name__ == "__main__":
     main()

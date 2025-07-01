@@ -294,7 +294,7 @@ def main():
     plt.tight_layout(); plt.savefig(f"{args.output}/pdfB_best_all.pdf",
                                     bbox_inches='tight'); plt.close(figBest)
 
-    # ---- pdfC  (unified importance heat‑maps) ----
+    # ---- pdfD  (unified importance heat‑maps) ----
     gmin,gmax = np.inf,-np.inf
     for d in importances.values():
         for arr in d.values():
@@ -312,7 +312,7 @@ def main():
         plt.xticks(rotation=90,fontsize=11); plt.yticks(fontsize=11)
         plt.title(f"Importances – {m}")
         plt.tight_layout()
-        plt.savefig(f"{args.output}/pdfC_{m.replace(' ','_')}.pdf"); plt.close()
+        plt.savefig(f"{args.output}/pdfD_{m.replace(' ','_')}.pdf"); plt.close()
 
     ###########################################################################
     # 6.  TEXT FILES & SUBSET CSVs  (unchanged logic)

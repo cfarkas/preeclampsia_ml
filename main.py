@@ -113,7 +113,7 @@ def parse_arguments():
         "--input",
         type=str,
         default=None,
-        help="Path to input CSV file (semicolon‑delimited)."
+        help="Path to input CSV/TSV file (delimiter auto‑detected)."
     )
     parser.add_argument(
         "--output",
@@ -152,15 +152,25 @@ def main():
     ########################
     # 1) Load Data + correlation
     ########################
-    # >>> NEW flexible loader: works with or without an 'id' column
-    try:
-        data = pd.read_csv(input_csv, delimiter=';', index_col='id')
-    except ValueError:
-        data = pd.read_csv(input_csv, delimiter=';')
+    # >>> smart delimiter detection to avoid KeyError when ',' or '\t' used
+    def smart_read_csv(path):
+        """Return the first read that has >1 column, trying ; , then tab."""
+        for delim in [';', ',', '\t']:
+            df = pd.read_csv(path, delimiter=delim)
+            if df.shape[1] > 1:
+                return df
+        raise ValueError("Unable to determine the correct delimiter of the input file.")
+
+    raw_df = smart_read_csv(input_csv)
+
+    # Handle optional 'id' column and stray unnamed index columns
+    if 'id' in raw_df.columns:
+        data = raw_df.set_index('id')
+    else:
+        data = raw_df
         if data.columns[0].startswith('Unnamed'):
             data = data.drop(columns=data.columns[0])
-        if data.index.name is None:
-            data.index.name = "index"
+        data.index.name = "index"
 
     corr_matrix = data.corr(numeric_only=True)
     plt.figure(figsize=(18, 14))
@@ -225,9 +235,9 @@ def main():
     ########################
     for outcome_col in classification_outcomes:
         X = data.drop(columns=[outcome_col])
-        others = [o for o in all_outcomes if o != outcome_col]
-        for o_ in others:
-            X = X.drop(columns=o_, errors='ignore')
+        for o_ in all_outcomes:
+            if o_ != outcome_col:
+                X = X.drop(columns=o_, errors='ignore')
         y = data[outcome_col].copy()
 
         for c in X.columns:
@@ -261,13 +271,12 @@ def main():
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
 
-            rec_ = recall_score(y_test, y_pred, average='macro')
-            recall_df.loc[outcome_col, m_] = rec_
+            recall_df.loc[outcome_col, m_] = recall_score(y_test, y_pred, average='macro')
 
             conf_ = confusion_matrix(y_test, y_pred)
             method_conf_matrices[outcome_col][m_] = conf_
 
-            # >>> SAVE RAW CONFUSION MATRIX
+            # >>> SAVE CONFUSION MATRIX
             np.savetxt(
                 os.path.join(output_dir, f"confmat_{outcome_col}_{m_.replace(' ', '_')}.csv"),
                 conf_, delimiter=';', fmt='%d')
@@ -287,9 +296,9 @@ def main():
     ########################
     for outcome_col in continuous_outcomes:
         X = data.drop(columns=[outcome_col])
-        others = [o for o in all_outcomes if o != outcome_col]
-        for o_ in others:
-            X = X.drop(columns=o_, errors='ignore')
+        for o_ in all_outcomes:
+            if o_ != outcome_col:
+                X = X.drop(columns=o_, errors='ignore')
         y = data[outcome_col].copy()
 
         for c in X.columns:
@@ -300,7 +309,7 @@ def main():
             X, y, test_size=0.2, random_state=7
         )
 
-        # >>> LOG REGRESSION SPLIT SIZE
+        # >>> LOG SPLIT SIZE (no class concept here)
         with open(os.path.join(output_dir, "split_log.txt"), "a") as lf:
             lf.write(f"{outcome_col},{len(y_train)},0,{len(y_test)},0\n")
 
@@ -350,25 +359,17 @@ def main():
         n_methods = len(method_names_cls)
         nrows, ncols = decide_layout(n_methods)
         figA, axesA = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4*ncols, 3*nrows))
-        if nrows*ncols == 1:
-            axesA = [axesA]
-        else:
-            axesA = axesA.flatten()
+        axesA = axesA.flatten() if nrows*ncols > 1 else [axesA]
 
-        white_to_darkblue = plt.cm.Blues
-
-        i_ = 0
-        for m_ in method_names_cls:
+        for idx, m_ in enumerate(method_names_cls):
             conf_ = method_conf_matrices[outcome_col][m_]
-            ax_ = axesA[i_]
-            i_ += 1
-            sns.heatmap(conf_, annot=True, fmt='g', ax=ax_, cmap=white_to_darkblue)
-            ax_.set_title(m_, fontsize=10)
-            ax_.set_xlabel("Predicted")
-            ax_.set_ylabel("Actual")
+            sns.heatmap(conf_, annot=True, fmt='g', ax=axesA[idx], cmap=plt.cm.Blues)
+            axesA[idx].set_title(m_, fontsize=10)
+            axesA[idx].set_xlabel("Predicted")
+            axesA[idx].set_ylabel("Actual")
 
-        for j in range(i_, nrows*ncols):
-            axesA[j].axis("off")
+        for ax in axesA[len(method_names_cls):]:
+            ax.axis("off")
 
         plt.tight_layout()
         figA.suptitle(f"Combined Confusion Matrices - {outcome_col}")
@@ -376,38 +377,28 @@ def main():
         plt.close(figA)
 
     ########################
-    # 6) Bar plots & radial plots for classification
+    # 6) Feature-importance bar & radial plots (classification)
     ########################
     for outcome_col in classification_outcomes:
         pdfB_path = os.path.join(output_dir, f"pdfB_{outcome_col}.pdf")
         n_methods = len(method_names_cls)
         nrowsB, ncolsB = decide_layout(n_methods)
         figB, axesB = plt.subplots(nrows=nrowsB, ncols=ncolsB, figsize=(4.5*ncolsB, 4.5*nrowsB))
-        if nrowsB*ncolsB == 1:
-            axesB = [axesB]
-        else:
-            axesB = axesB.flatten()
+        axesB = axesB.flatten() if nrowsB*ncolsB > 1 else [axesB]
 
-        Xtemp = data.drop(columns=[outcome_col])
-        for o_ in all_outcomes:
-            if o_ != outcome_col:
-                Xtemp = Xtemp.drop(columns=o_, errors='ignore')
+        Xtemp = data.drop(columns=all_outcomes, errors='ignore')
         feat_names = np.array(Xtemp.columns)
 
-        i_ = 0
-        for m_ in method_names_cls:
+        for idx, m_ in enumerate(method_names_cls):
             imps = method_importances[outcome_col][m_]
             sorted_idx = np.argsort(imps)[::-1]
-            ax_ = axesB[i_]
-            i_ += 1
-            bar_labels = feat_names[sorted_idx]
-            ax_.barh(bar_labels, imps[sorted_idx], color='steelblue')
-            ax_.invert_yaxis()
-            ax_.set_title(m_, fontsize=10)
-            ax_.set_xlabel("Mean Decrease")
+            axesB[idx].barh(feat_names[sorted_idx], imps[sorted_idx], color='steelblue')
+            axesB[idx].invert_yaxis()
+            axesB[idx].set_title(m_, fontsize=10)
+            axesB[idx].set_xlabel("Mean Decrease")
 
-        for j in range(i_, nrowsB*ncolsB):
-            axesB[j].axis("off")
+        for ax in axesB[len(method_names_cls):]:
+            ax.axis("off")
 
         figB.suptitle(f"Permutation Importances - {outcome_col}")
         plt.tight_layout()
@@ -420,44 +411,29 @@ def main():
         figC, axesC = plt.subplots(nrows=nrowsC, ncols=ncolsC,
                                    figsize=(6*ncolsC, 5*nrowsC),
                                    subplot_kw=dict(polar=True))
-        if nrowsC*ncolsC == 1:
-            axesC = [axesC]
-        else:
-            axesC = axesC.flatten()
+        axesC = axesC.flatten() if nrowsC*ncolsC > 1 else [axesC]
 
-        Xtemp2 = data.drop(columns=[outcome_col])
-        for o_ in all_outcomes:
-            if o_ != outcome_col:
-                Xtemp2 = Xtemp2.drop(columns=o_, errors='ignore')
-        feat_names_for_radial = np.array(Xtemp2.columns)
-        n_feat = len(feat_names_for_radial)
+        n_feat = len(feat_names)
         base_angles = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
 
-        i_ = 0
-        for m_ in method_names_cls:
+        for idx, m_ in enumerate(method_names_cls):
             imps = method_importances[outcome_col][m_]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
-            sorted_feats = feat_names_for_radial[sorted_idx]
-
+            sorted_feats = feat_names[sorted_idx]
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            angles = base_angles[:]
-            angles += angles[:1]
+            angles = base_angles + base_angles[:1]
 
-            ax_ = axesC[i_]
-            i_ += 1
-            ax_.plot(angles, rep_imps, linewidth=2, linestyle='solid', color='darkviolet')
-            ax_.fill(angles, rep_imps, alpha=0.25, color='darkviolet')
-            ax_.set_theta_offset(math.pi/2)
-            ax_.set_theta_direction(-1)
-            ax_.set_ylim(0, max(0, max(rep_imps)))
-            ax_.set_title(m_, fontsize=10)
+            axesC[idx].plot(angles, rep_imps, linewidth=2, color='darkviolet')
+            axesC[idx].fill(angles, rep_imps, alpha=0.25, color='darkviolet')
+            axesC[idx].set_theta_offset(math.pi/2)
+            axesC[idx].set_theta_direction(-1)
+            axesC[idx].set_ylim(0, max(rep_imps))
+            axesC[idx].set_title(m_, fontsize=10)
+            axesC[idx].set_thetagrids(np.degrees(angles[:-1]), labels=sorted_feats, fontsize=6)
 
-            degs = np.degrees(angles[:-1])
-            ax_.set_thetagrids(degs, labels=sorted_feats, fontsize=6)
-
-        for j in range(i_, nrowsC*ncolsC):
-            axesC[j].axis("off")
+        for ax in axesC[len(method_names_cls):]:
+            ax.axis("off")
 
         figC.suptitle(f"Radial Importances - {outcome_col}")
         plt.tight_layout()
@@ -468,101 +444,76 @@ def main():
     # 7) Radial plots for regression
     ########################
     for outcome_col in continuous_outcomes:
-        reg_method_names = list(regressors.keys())
         pdfC_reg_path = os.path.join(output_dir, f"pdfC_{outcome_col}_regression.pdf")
-
+        reg_method_names = list(regressors.keys())
         nrowsR, ncolsR = decide_layout(len(reg_method_names))
-        figCreg, axesCreg = plt.subplots(nrows=nrowsR, ncols=ncolsR,
-                                         figsize=(6*ncolsR, 5*nrowsR),
-                                         subplot_kw=dict(polar=True))
-        if nrowsR*ncolsR == 1:
-            axesCreg = [axesCreg]
-        else:
-            axesCreg = axesCreg.flatten()
+        figR, axesR = plt.subplots(nrows=nrowsR, ncols=ncolsR,
+                                   figsize=(6*ncolsR, 5*nrowsR),
+                                   subplot_kw=dict(polar=True))
+        axesR = axesR.flatten() if nrowsR*ncolsR > 1 else [axesR]
 
-        XtempR = data.drop(columns=[outcome_col])
-        for o_ in all_outcomes:
-            if o_ != outcome_col:
-                XtempR = XtempR.drop(columns=o_, errors='ignore')
-        feat_names_for_radial = np.array(XtempR.columns)
-        n_feat = len(feat_names_for_radial)
-        base_angles_r = np.linspace(0, 2*math.pi, n_feat, endpoint=False).tolist()
+        XtempR = data.drop(columns=all_outcomes, errors='ignore')
+        feat_names_R = np.array(XtempR.columns)
+        n_featR = len(feat_names_R)
+        base_anglesR = np.linspace(0, 2*math.pi, n_featR, endpoint=False).tolist()
 
-        i_ = 0
-        for r_ in reg_method_names:
+        for idx, r_ in enumerate(reg_method_names):
             imps = method_importances[outcome_col][r_]
             sorted_idx = np.argsort(imps)[::-1]
             sorted_imps = imps[sorted_idx]
-            sorted_feats = feat_names_for_radial[sorted_idx]
-
+            sorted_feats = feat_names_R[sorted_idx]
             rep_imps = np.concatenate((sorted_imps, [sorted_imps[0]]))
-            angles_r = base_angles_r[:]
-            angles_r += angles_r[:1]
+            anglesR = base_anglesR + base_anglesR[:1]
 
-            ax_ = axesCreg[i_]
-            i_ += 1
-            ax_.plot(angles_r, rep_imps, linewidth=2, linestyle='solid', color='darkviolet')
-            ax_.fill(angles_r, rep_imps, alpha=0.25, color='darkviolet')
-            ax_.set_theta_offset(math.pi/2)
-            ax_.set_theta_direction(-1)
-            ax_.set_ylim(0, max(0, max(rep_imps)))
-            ax_.set_title(r_, fontsize=10)
+            axesR[idx].plot(anglesR, rep_imps, linewidth=2, color='darkviolet')
+            axesR[idx].fill(anglesR, rep_imps, alpha=0.25, color='darkviolet')
+            axesR[idx].set_theta_offset(math.pi/2)
+            axesR[idx].set_theta_direction(-1)
+            axesR[idx].set_ylim(0, max(rep_imps))
+            axesR[idx].set_title(r_, fontsize=10)
+            axesR[idx].set_thetagrids(np.degrees(anglesR[:-1]), labels=sorted_feats, fontsize=6)
 
-            degs = np.degrees(angles_r[:-1])
-            ax_.set_thetagrids(degs, labels=sorted_feats, fontsize=6)
+        for ax in axesR[len(reg_method_names):]:
+            ax.axis("off")
 
-        for j in range(i_, nrowsR*ncolsR):
-            axesCreg[j].axis("off")
-
-        figCreg.suptitle(f"Radial Importances - {outcome_col}")
+        figR.suptitle(f"Radial Importances - {outcome_col}")
         plt.tight_layout()
         plt.savefig(pdfC_reg_path)
-        plt.close(figCreg)
+        plt.close(figR)
 
     ########################
-    # 8) pdfD heat‑maps across outcomes & features
+    # 8) Unified importances heat‑maps (pdfD)
     ########################
-    global_minD = float('inf')
-    global_maxD = float('-inf')
-    all_methods = list(classifiers.keys()) + list(regressors.keys())
-
-    for method_name in all_methods:
-        for out_ in all_outcomes:
-            if method_name in method_importances[out_]:
-                arr_ = method_importances[out_][method_name]
-                if len(arr_):
-                    global_minD = min(global_minD, np.min(arr_))
-                    global_maxD = max(global_maxD, np.max(arr_))
+    all_methods = method_names_cls + method_names_reg
+    global_min, global_max = np.inf, -np.inf
+    for m_ in all_methods:
+        for o_ in all_outcomes:
+            if m_ in method_importances[o_]:
+                arr = method_importances[o_][m_]
+                if len(arr):
+                    global_min = min(global_min, np.min(arr))
+                    global_max = max(global_max, np.max(arr))
 
     all_feats = data.drop(columns=all_outcomes, errors='ignore').columns.tolist()
-    n_all_feats = len(all_feats)
-
-    for method_name in all_methods:
-        used_outs = [out_ for out_ in all_outcomes if method_name in method_importances[out_]]
-        if not used_outs:
+    for m_ in all_methods:
+        outs_used = [o_ for o_ in all_outcomes if m_ in method_importances[o_]]
+        if not outs_used:
             continue
+        mat = np.zeros((len(outs_used), len(all_feats)))
+        for row, o_ in enumerate(outs_used):
+            Xtmp = data.drop(columns=all_outcomes, errors='ignore')
+            feats_o = list(Xtmp.columns)
+            imps_o = method_importances[o_][m_]
+            for j, feat in enumerate(feats_o):
+                if feat in all_feats:
+                    mat[row, all_feats.index(feat)] = imps_o[j]
 
-        mat = np.zeros((len(used_outs), n_all_feats))
-        for i, out_ in enumerate(used_outs):
-            XtempD = data.drop(columns=[out_], errors='ignore')
-            for xo in all_outcomes:
-                if xo != out_:
-                    XtempD = XtempD.drop(columns=xo, errors='ignore')
-            feats_for_out = list(XtempD.columns)
-            imps_arr = method_importances[out_][method_name]
-            for j, feat_j in enumerate(feats_for_out):
-                if feat_j in all_feats:
-                    mat[i, all_feats.index(feat_j)] = imps_arr[j]
-
-        pdfD_path = os.path.join(output_dir, f"pdfD_{method_name.replace(' ', '_')}.pdf")
-        plt.figure(figsize=(1.2*n_all_feats, 1.2*len(used_outs)))
-        sns.heatmap(
-            mat, annot=False, cmap='inferno',
-            xticklabels=all_feats, yticklabels=used_outs,
-            vmin=global_minD, vmax=global_maxD
-        )
+        pdfD_path = os.path.join(output_dir, f"pdfD_{m_.replace(' ', '_')}.pdf")
+        plt.figure(figsize=(1.2*len(all_feats), 1.2*len(outs_used)))
+        sns.heatmap(mat, cmap='inferno', vmin=global_min, vmax=global_max,
+                    xticklabels=all_feats, yticklabels=outs_used)
         plt.xticks(rotation=90)
-        plt.title(f"Inferno Heatmap - {method_name} (Importances) [Unified Scale]")
+        plt.title(f"Inferno Heatmap - {m_} (Importances)")
         plt.xlabel("Features")
         plt.ylabel("Outcomes")
         plt.tight_layout()
@@ -572,84 +523,61 @@ def main():
     ########################
     # 9) Save regression metrics
     ########################
-    reg_metrics_file = os.path.join(output_dir, "regression_metrics_summary.txt")
-    with open(reg_metrics_file, "w") as f:
+    with open(os.path.join(output_dir, "regression_metrics_summary.txt"), "w") as f:
         f.write("Regression Metrics (MSE, RMSE, MAE, R2)\n\n")
         for out_ in continuous_outcomes:
             f.write(f"Outcome: {out_}\n")
             for r_ in method_names_reg:
-                if r_ in regression_metrics[out_]:
-                    mse_val, rmse_val, mae_val, r2_val = regression_metrics[out_][r_]
-                    f.write(f"  {r_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
+                mse_val, rmse_val, mae_val, r2_val = regression_metrics[out_][r_]
+                f.write(f"  {r_}: MSE={mse_val:.2f}, RMSE={rmse_val:.2f}, "
+                        f"MAE={mae_val:.2f}, R2={r2_val:.2f}\n")
             f.write("\n")
 
     ########################
-    # 10) Generate best‑feature subset
+    # 10) Generate best‑feature subset CSV
     ########################
-    def pick_best_method_classification(outcome):
-        best_m, best_score = None, -999
-        for m_ in method_names_cls:
-            score = recall_df.loc[outcome, m_]
-            if score > best_score:
-                best_m, best_score = m_, score
-        return best_m
+    def best_method_cls(outcome):
+        return recall_df.loc[outcome].idxmax()
 
-    def pick_best_method_regression(outcome):
-        best_m, best_mse = None, float('inf')
-        for r_ in method_names_reg:
-            if r_ in regression_metrics[outcome]:
-                mse_val = regression_metrics[outcome][r_][0]
-                if mse_val < best_mse:
-                    best_m, best_mse = r_, mse_val
-        return best_m
+    def best_method_reg(outcome):
+        return min(regression_metrics[outcome], key=lambda m: regression_metrics[outcome][m][0])
 
-    top_cutoff = 0.02
-    best_feat_union = set()
+    best_feats = set()
+    cutoff = 0.02
+    for o_ in classification_outcomes:
+        m_ = best_method_cls(o_)
+        imps = method_importances[o_][m_]
+        Xtmp = data.drop(columns=all_outcomes, errors='ignore')
+        feats = list(Xtmp.columns)
+        idxs = np.where(imps > cutoff)[0] if np.any(imps > cutoff) else [int(np.argmax(imps))]
+        best_feats.update([feats[i] for i in idxs])
 
-    for out_ in classification_outcomes:
-        bm_ = pick_best_method_classification(out_)
-        if bm_:
-            Xtmp = data.drop(columns=all_outcomes, errors='ignore')
-            feats_ = list(Xtmp.columns)
-            imps_ = method_importances[out_][bm_]
-            mask = imps_ > top_cutoff
-            idxs = np.where(mask)[0] if np.any(mask) else [int(np.argmax(imps_))]
-            best_feat_union.update([feats_[i] for i in idxs])
+    for o_ in continuous_outcomes:
+        m_ = best_method_reg(o_)
+        imps = method_importances[o_][m_]
+        Xtmp = data.drop(columns=all_outcomes, errors='ignore')
+        feats = list(Xtmp.columns)
+        idxs = np.where(imps > cutoff)[0] if np.any(imps > cutoff) else [int(np.argmax(imps))]
+        best_feats.update([feats[i] for i in idxs])
 
-    for out_ in continuous_outcomes:
-        bm_ = pick_best_method_regression(out_)
-        if bm_:
-            Xtmp = data.drop(columns=all_outcomes, errors='ignore')
-            feats_ = list(Xtmp.columns)
-            imps_ = method_importances[out_][bm_]
-            mask = imps_ > top_cutoff
-            idxs = np.where(mask)[0] if np.any(mask) else [int(np.argmax(imps_))]
-            best_feat_union.update([feats_[i] for i in idxs])
-
-    final_subset_cols = list(best_feat_union) + all_outcomes
-    final_subset_df = data[final_subset_cols].copy()
-    final_subset_df.to_csv(os.path.join(output_dir, "best_features_overall_subset.csv"),
-                           sep=';', index=True)
+    subset_cols = list(best_feats) + all_outcomes
+    data[subset_cols].to_csv(os.path.join(output_dir, "best_features_overall_subset.csv"),
+                             sep=';', index=True)
 
     ########################
     # 11) Recall heat‑map
     ########################
-    print("\n[INFO] Generating recall‑score heat‑map…")
-    recall_heatmap_path = os.path.join(output_dir, "recall_scores_heatmap.pdf")
     plt.figure(figsize=(1.5*len(method_names_cls), 1.2*len(classification_outcomes)))
-    sns.heatmap(recall_df.loc[classification_outcomes, method_names_cls],
-                annot=True, cmap='cividis', fmt=".2f")
+    sns.heatmap(recall_df.loc[classification_outcomes], annot=True, cmap='cividis', fmt=".2f")
     plt.title("Recall Scores Heat‑Map (Classification Outcomes × Methods)")
     plt.xlabel("Methods")
     plt.ylabel("Outcomes")
     plt.tight_layout()
-    plt.savefig(recall_heatmap_path)
+    plt.savefig(os.path.join(output_dir, "recall_scores_heatmap.pdf"))
     plt.close()
 
-    print("\n[INFO] Pipeline completed successfully.\n"
-          "      • split_log.txt records training/test class balance\n"
-          "      • confmat_*.csv files store every raw confusion matrix\n"
-          "      • figures now have enlarged fonts and sharp 300 DPI rendering\n")
+    print("\n[INFO] Pipeline complete.\n"
+          f"      All outputs saved to: {output_dir}\n")
 
 if __name__ == "__main__":
     main()

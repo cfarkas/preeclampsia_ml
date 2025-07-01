@@ -125,7 +125,7 @@ def main():
     # 4‑B.  CORRELATION MATRICES
     ###########################################################################
     # –– full matrix
-    plt.figure(figsize=(25,19))
+    plt.figure(figsize=(22,17))
     sns.heatmap(data.corr(numeric_only=True), annot=True, fmt=".2f",
                 cmap='seismic', vmin=-1, vmax=1, linewidths=.4, linecolor='white',
                 cbar_kws={"shrink":0.5}, annot_kws={"size":12})
@@ -137,7 +137,7 @@ def main():
     corr = data.corr(numeric_only=True).abs()
     keep_feats = [c for c in feat_cols if corr.loc[c, cls_out+cont_out].max() >= CORR_TH]
     filt_cols  = keep_feats + all_out
-    plt.figure(figsize=(22,17))
+    plt.figure(figsize=(20,15))
     sns.heatmap(data[filt_cols].corr(numeric_only=True), annot=True, fmt=".2f",
                 cmap='seismic', vmin=-1, vmax=1, linewidths=.4, linecolor='white',
                 cbar_kws={"shrink":0.5}, annot_kws={"size":11})

@@ -13,7 +13,7 @@ conda run -n ml_preeclampsia python3 main.py \
           --output ./results/
 
 # Re-Train
-python3 main.py --input ./example/test_run/best_features_overall_subset.csv --output ./example/test_run_subset/
+python3 main.py --input ./example/test_run/subset_top25_percent.csv --output ./example/test_run_subset/
 ```
 
 ---

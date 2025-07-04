@@ -299,33 +299,36 @@ def main():
         plt.close()
 
     # ------------------------------------------------------------------ #
-    # 11. FIGURE 3 (best models per outcome)
+    # 11. FIGURE 3 – best‑performing classifier per categorical outcome
     # ------------------------------------------------------------------ #
-    fixed_choice = {
-        "preeclampsia_onset":   "LogReg",
-        "delivery_type":        "MLP",
-        "newborn_vital_status": "GNB",
-        "newborn_malformations":"GNB",
-        "eclampsia_hellp":      "DecTree",
-        "iugr":                 "DecTree"
+    ordered_panels = classification_out  # keep original outcome ordering
+
+    # pick model with highest macro‑recall for each outcome
+    best_method = {
+        o: recall_df.loc[o, meth_cls].idxmax() for o in ordered_panels
     }
-    ordered_panels = list(fixed_choice.keys())
+
     nr, nc = grid_shape(len(ordered_panels))
     fig3, axes3 = plt.subplots(nr, nc, figsize=(18, 14))
     axes3 = axes3.flatten()
+
     for idx, out in enumerate(ordered_panels):
-        model = fixed_choice[out]
-        imp = importances[out][model]
-        order = np.argsort(imp)[::-1]
-        axes3[idx].barh(np.array(feature_cols)[order], imp[order],
+        model_name = best_method[out]
+        imp_vec = importances[out][model_name]
+        order = np.argsort(imp_vec)[::-1]
+        axes3[idx].barh(np.array(feature_cols)[order], imp_vec[order],
                         color='steelblue')
         axes3[idx].invert_yaxis()
         axes3[idx].tick_params(axis='y', labelsize=10)
-        axes3[idx].set_title(f"{chr(65+idx)}) {out.replace('_',' ').title()} – {model}",
-                             fontsize=18)
+        pretty_out = out.replace('_', ' ').title()
+        axes3[idx].set_title(
+            f"{chr(65+idx)}) {pretty_out} – {model_name}", fontsize=18
+        )
         axes3[idx].set_xlabel("Mean Decrease")
+
     for ax in axes3[len(ordered_panels):]:
         ax.axis("off")
+
     fig3.subplots_adjust(left=0.38)
     plt.tight_layout()
     plt.savefig(f"{args.output}/Fig3_paper.pdf", bbox_inches='tight')

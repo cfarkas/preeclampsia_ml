@@ -1,5 +1,6 @@
 # preeclampsia_ml
-machine learning method for prediction outcomes in preeclampsia
+Deterministic end‑to‑end **Python / scikit‑learn** workflow for benchmarking a
+battery of classical machine‑learning models on maternal–fetal datasets.
 
 ## 🚀 Quick‑start
 
@@ -15,11 +16,6 @@ conda run -n ml_preeclampsia python3 main.py \
 # Re-Train
 python3 main.py --input ./example/test_run/best_features_overall_subset.csv --output ./example/test_run_subset/
 ```
-
-#### Preeclampsia‑ML Pipeline
-
-Deterministic end‑to‑end **Python / scikit‑learn** workflow for benchmarking a
-battery of classical machine‑learning models on maternal–fetal datasets.
 
 ---
 

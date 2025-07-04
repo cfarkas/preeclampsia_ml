@@ -30,29 +30,29 @@ in a single command.
 
 | Stage | Highlights |
 |-------|------------|
-| **Environment** | Optional `--install_conda` flag bootstraps a dedicated **`ml_preeclampsia`** conda env (Python 3.9 + pandas / scikit‑learn / seaborn, etc.). |
-| **Reproducibility** | Global seed `SEED = 7` → identical train/test splits, model initialisation and permutation‑importance scores across runs. |
-| **Correlation analysis** | *Full* Pearson matrix **AND** a *filtered* matrix (|ρ| ≥ 0.12 to any outcome) |
-| **Model zoo** | Classification – `LogReg`, `LDA`, `GNB`, `KNN`, `DecTree`, `RF`, `GradBoost`, `SVM`, `MLP`.<br>Regression – `RFreg`, `GBreg`. |
-| **Metrics** | Macro‑averaged **recall** for all classification tasks; MSE / RMSE / MAE / R² for continuous outcomes. |
-| **Visual reporting** | *pdfA* confusion‑matrix grids; *pdfB* permutation‑importance bar grids; **Fig 3** – consolidated best‑model bars (18 × 14 in); supersized **`importances.pdf`** dot‑plot across all models/outcomes; **Fig 2** recall heat‑map. |
-| **Feature export** | Three ready‑to‑use CSV subsets – overall (importance > 0.02), top‑50 %, top‑25 %. | 
+| **Environment** | `--install_conda` bootstraps *ml_preeclampsia* env (Python 3.9 + all deps). |
+| **Reproducibility** | Global seed `SEED = 7` → identical splits, weights and importances every run. |
+| **Correlation analysis** | Generates both a **full Pearson matrix** *and* a **filtered matrix** that keeps any variable showing \|ρ\| ≥ 0.12 with at least one outcome. |
+| **Models** | **Classification models:** `LogReg`, `LDA`, `GNB`, `KNN`, `DecTree`, `RF`, `GradBoost`, `SVM`, `MLP`.<br>**Regression models:** `RFreg`, `GBreg`. |
+| **Metrics** | Macro‑averaged **recall** (classification) &rarr; primary score.<br>MSE / RMSE / MAE / R² (regression). |
+| **Visual reporting** | • **`pdfA_*.pdf`** confusion‑matrix grids.<br>• **`pdfB_*.pdf`** permutation‑importance bar grids.<br>• **`Fig3_paper.pdf`** consolidated best‑model bars (18 × 14 in).<br>• **`importances.pdf`** supersized dot‑plot across *all* models/outcomes.<br>• **`Fig2_paper.pdf`** recall heat‑map.<br>• **`Fig1_paper.pdf`** filtered correlation matrix. |
+| **Feature export** | Three ready‑to‑use CSV subsets — importance > 0.02, top‑50 %, top‑25 % — for lean re‑training. |
 
 ---
 
 ## Outputs
-
+```
 results/
-├── Fig1_paper.pdf # filtered correlation 
+├── Fig1_paper.pdf # filtered correlation (|ρ| ≥ 0.12, 30 pt font)
 ├── Fig2_paper.pdf # recall heat‑map
-├── Fig3_paper.pdf # best‑model importances (panels A–F)
-├── importances.pdf # dot‑plot: all models × outcomes
-├── pdfA_<outcome>.pdf # confusion matrix grids
-├── pdfB_<outcome>.pdf # permutation‑importance bars
-├── full_corr_matrix.pdf
+├── Fig3_paper.pdf # best‑model permutation‑importances (panels A–F)
+├── importances.pdf # dot‑plot: all models × all outcomes
+├── pdfA_<outcome>.pdf # confusion‑matrix grids
+├── pdfB_<outcome>.pdf # permutation‑importance bar grids
+├── full_corr_matrix.pdf # complete Pearson matrix
 ├── regression_metrics_summary.txt
 ├── subset_overall_subset.csv
 ├── subset_top50_percent.csv
 ├── subset_top25_percent.csv
 └── … (additional PDFs for every outcome)
- 
+```

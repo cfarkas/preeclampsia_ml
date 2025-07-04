@@ -1,6 +1,5 @@
 # preeclampsia_ml
-Deterministic end‑to‑end **Python / scikit‑learn** workflow for benchmarking a
-battery of classical machine‑learning models on maternal–fetal datasets.
+Machine learning workflow for benchmarking classical machine‑learning models on maternal–fetal datasets.
 
 ## 🚀 Quick‑start
 

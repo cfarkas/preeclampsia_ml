@@ -17,14 +17,42 @@ python3 main.py --input ./example/dataframe.csv --output ./example/test_run/
 python3 main.py --input ./example/test_run/best_features_overall_subset.csv --output ./example/test_run_subset/
 ```
 
-#### This pipeline systematically tests multiple outcomes from a given dataset as follows:
+#### Preeclampsia‑ML Pipeline
 
-1) It trains a set of classifiers (Logistic Regression, SVM, Random Forest, MLP, etc.) on each classification outcome.
-2) It computes recall (macro‐averaged) as the primary metric.
-3) It generates:
-- Confusion Matrix PDFs (showing each method’s predictions vs. actual labels).
-- Bar Charts of permutation importances (PDF B).
-- Radial Plots of permutation importances (PDF C) to visualize which features most influenced each classifier.
-- Regression (e.g., RandomForestRegressor, GradientBoostingRegressor, for continuous outcomes like gestational_age_delivery and newborn_weight):
+Deterministic end‑to‑end **Python / scikit‑learn** workflow for benchmarking a
+battery of classical machine‑learning models on maternal–fetal datasets.
+Generates publication‑ready figures, performance tables and feature‑subset CSVs
+in a single command.
 
-4) Will select best features that can be inputted again in the pipeline to benchmark performance with those. 
+---
+
+## Key Features
+
+| Stage | Highlights |
+|-------|------------|
+| **Environment** | Optional `--install_conda` flag bootstraps a dedicated **`ml_preeclampsia`** conda env (Python 3.9 + pandas / scikit‑learn / seaborn, etc.). |
+| **Reproducibility** | Global seed `SEED = 7` → identical train/test splits, model initialisation and permutation‑importance scores across runs. |
+| **Correlation analysis** | *Full* Pearson matrix **AND** a *filtered* matrix (|ρ| ≥ 0.12 to any outcome) |
+| **Model zoo** | Classification – `LogReg`, `LDA`, `GNB`, `KNN`, `DecTree`, `RF`, `GradBoost`, `SVM`, `MLP`.<br>Regression – `RFreg`, `GBreg`. |
+| **Metrics** | Macro‑averaged **recall** for all classification tasks; MSE / RMSE / MAE / R² for continuous outcomes. |
+| **Visual reporting** | *pdfA* confusion‑matrix grids; *pdfB* permutation‑importance bar grids; **Fig 3** – consolidated best‑model bars (18 × 14 in); supersized **`importances.pdf`** dot‑plot across all models/outcomes; **Fig 2** recall heat‑map. |
+| **Feature export** | Three ready‑to‑use CSV subsets – overall (importance > 0.02), top‑50 %, top‑25 %. |
+
+---
+
+## Outputs
+
+results/
+├── Fig1_paper.pdf # filtered correlation 
+├── Fig2_paper.pdf # recall heat‑map
+├── Fig3_paper.pdf # best‑model importances (panels A–F)
+├── importances.pdf # dot‑plot: all models × outcomes
+├── pdfA_<outcome>.pdf # confusion matrix grids
+├── pdfB_<outcome>.pdf # permutation‑importance bars
+├── full_corr_matrix.pdf
+├── regression_metrics_summary.txt
+├── subset_overall_subset.csv
+├── subset_top50_percent.csv
+├── subset_top25_percent.csv
+└── … (additional PDFs for every outcome)
+ 

@@ -21,8 +21,6 @@ python3 main.py --input ./example/test_run/best_features_overall_subset.csv --ou
 
 Deterministic end‑to‑end **Python / scikit‑learn** workflow for benchmarking a
 battery of classical machine‑learning models on maternal–fetal datasets.
-Generates publication‑ready figures, performance tables and feature‑subset CSVs
-in a single command.
 
 ---
 

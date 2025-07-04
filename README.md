@@ -1,19 +1,18 @@
 # preeclampsia_ml
 machine learning method for prediction outcomes in preeclampsia
 
-### Install & Execution
-```
-git clone https://github.com/cfarkas/preeclampsia_ml.git
-cd preeclampsia_ml
+## 🚀 Quick‑start
 
-# Help
-python3 main.py --help
-
-# Install
+```bash
+# One‑time: create env and install deps
 python3 main.py --install_conda
 
-# Test Run: Use all data and then re-train with best features. 
-python3 main.py --input ./example/dataframe.csv --output ./example/test_run/
+# Run the full pipeline
+conda run -n ml_preeclampsia python3 main.py \
+          --input ./data/preeclampsia_dataset.csv \
+          --output ./results/
+
+# Re-Train
 python3 main.py --input ./example/test_run/best_features_overall_subset.csv --output ./example/test_run_subset/
 ```
 
@@ -36,6 +35,11 @@ battery of classical machine‑learning models on maternal–fetal datasets.
 | **Visual reporting** | • **`pdfA_*.pdf`** confusion‑matrix grids.<br>• **`pdfB_*.pdf`** permutation‑importance bar grids.<br>• **`Fig3_paper.pdf`** consolidated best‑model bars (18 × 14 in).<br>• **`importances.pdf`** supersized dot‑plot across *all* models/outcomes.<br>• **`Fig2_paper.pdf`** recall heat‑map.<br>• **`Fig1_paper.pdf`** filtered correlation matrix. |
 | **Feature export** | Three ready‑to‑use CSV subsets — importance > 0.02, top‑50 %, top‑25 % — for lean re‑training. |
 
+## Implementation Notes
+
+- Scaling: numeric features → StandardScaler; categoricals → label‑encoded.
+- Permutation importance: 5 repeats, seeded, n_jobs=-1.
+- Splits: 80 / 20 stratified (classification) or plain (regression).
 ---
 
 ## Outputs

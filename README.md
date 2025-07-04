@@ -4,15 +4,13 @@ Machine learning workflow for benchmarking classical machine‑learning models o
 ## 🚀 Quick‑start
 
 ```bash
-# One‑time: create env and install deps
+# One‑time: clone repository, create env and install dependences
 git clone https://github.com/cfarkas/preeclampsia_ml.git
 cd preeclampsia_ml
 python3 main.py --install_conda
 
 # Run the full pipeline
-conda run -n ml_preeclampsia python3 main.py \
-          --input ./data/preeclampsia_dataset.csv \
-          --output ./results/
+python3 main.py --input ./example/dataframe.csv --output ./example/test_run/
 
 # Re-Train
 python3 main.py --input ./example/test_run/subset_top25_percent.csv --output ./example/test_run_subset/

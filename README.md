@@ -13,7 +13,7 @@ python3 main.py --install_conda
 python3 main.py --input ./example/dataframe.csv --output ./example/test_run/
 
 # Re-Train
-python3 main.py --input ./example/test_run/subset_top25_percent.csv --output ./example/test_run_subset/
+python3 main.py --input ./example/test_run/subset_25.csv --output ./example/test_run_subset/
 ```
 
 ---

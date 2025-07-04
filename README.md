@@ -36,7 +36,7 @@ in a single command.
 | **Model zoo** | Classification – `LogReg`, `LDA`, `GNB`, `KNN`, `DecTree`, `RF`, `GradBoost`, `SVM`, `MLP`.<br>Regression – `RFreg`, `GBreg`. |
 | **Metrics** | Macro‑averaged **recall** for all classification tasks; MSE / RMSE / MAE / R² for continuous outcomes. |
 | **Visual reporting** | *pdfA* confusion‑matrix grids; *pdfB* permutation‑importance bar grids; **Fig 3** – consolidated best‑model bars (18 × 14 in); supersized **`importances.pdf`** dot‑plot across all models/outcomes; **Fig 2** recall heat‑map. |
-| **Feature export** | Three ready‑to‑use CSV subsets – overall (importance > 0.02), top‑50 %, top‑25 %. |
+| **Feature export** | Three ready‑to‑use CSV subsets – overall (importance > 0.02), top‑50 %, top‑25 %. | 
 
 ---
 

@@ -18,7 +18,7 @@ python3 main.py --input ./example/test_run/subset_25.csv --output ./example/test
 # Run the full pipeline (using k-fold instead of split)
 python3 main_kfold.py --input ./example/dataframe.csv --output ./out_10kfold/
 
-# Re-Train
+# Re-Train (using k-fold instead of split)
 python3 main_kfold.py --input ./out_10kfold/subset_25.csv --output ./out_10kfold/test_run_subset/
 ```
 ```

@@ -21,7 +21,10 @@ python3 main_kfold.py --input ./example/dataframe.csv --output ./out_10kfold/
 # Re-Train
 python3 main_kfold.py --input ./out_10kfold/subset_25.csv --output ./out_10kfold/test_run_subset/
 ```
-
+```
+# Cochran-Armitage trend test (exact, two‑sided) for ordinal variables
+python table_report.py --csv  dataframe.csv --meta_xlsx  PE_dataset_variables.xlsx
+```
 ---
 
 ## Key Features

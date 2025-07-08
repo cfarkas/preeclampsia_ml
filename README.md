@@ -10,20 +10,19 @@ cd preeclampsia_ml
 python3 main.py --install_conda
 
 # Run the full pipeline
-python3 main.py --input ./example/dataframe.csv --output ./example/test_run/
-
+python3 main.py --input dataframe.csv --output ./out_20_80/
 # Re-Train
-python3 main.py --input ./example/test_run/subset_25.csv --output ./example/test_run_subset/
+python3 main.py --input ./out_20_80/subset_25.csv --output ./out_20_80/25_perc_subset/
 
 # Run the full pipeline (using k-fold instead of split)
-python3 main_kfold.py --input ./example/dataframe.csv --output ./out_10kfold/
+python3 main_kfold.py --input dataframe.csv --output ./out_10kfold/
 
 # Re-Train (using k-fold instead of split)
-python3 main_kfold.py --input ./out_10kfold/subset_25.csv --output ./out_10kfold/test_run_subset/
+python3 main_kfold.py --input ./out_10kfold/subset_25.csv --output ./out_10kfold/25_perc_subset/
 ```
 ```
 # Cochran-Armitage trend test (exact, two‑sided) for ordinal variables
-python3 cochran_armitage.py --csv ./example/dataframe.csv --meta_xlsx  PE_dataset_variables.xlsx
+python3 cochran_armitage.py --csv dataframe.csv --meta_xlsx PE_dataset_variables.xlsx
 ```
 ---
 

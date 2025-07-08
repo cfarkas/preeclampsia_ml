@@ -13,9 +13,9 @@ python3 main.py --install_conda
 python3 main.py --input dataframe.csv --output ./out_20_80/
 # Re-Train
 python3 main.py --input ./out_20_80/subset_25.csv --output ./out_20_80/25_perc_subset/
+
 # Run the full pipeline (using k-fold instead of split)
 python3 main_kfold.py --input dataframe.csv --output ./out_10kfold/
-
 # Re-Train (using k-fold instead of split)
 python3 main_kfold.py --input ./out_10kfold/subset_25.csv --output ./out_10kfold/25_perc_subset/
 ```

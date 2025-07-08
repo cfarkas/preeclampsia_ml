@@ -1,0 +1,10 @@
+Regression Metrics (mean of 5‑fold CV)
+
+gestational_age_delivery:
+  RFreg       MSE=15.29  RMSE=3.88  MAE=3.14  R2=-0.14
+  GBreg       MSE=18.74  RMSE=4.29  MAE=3.39  R2=-0.43
+
+newborn_weight:
+  RFreg       MSE=800180.13  RMSE=888.18  MAE=722.50  R2=-0.17
+  GBreg       MSE=950866.67  RMSE=970.46  MAE=799.88  R2=-0.43
+

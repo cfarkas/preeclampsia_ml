@@ -35,8 +35,9 @@ python3 cochran_armitage.py --csv dataframe.csv --meta_xlsx PE_dataset_variables
 | **Models** | **Classification models:** `LogReg`, `LDA`, `GNB`, `KNN`, `DecTree`, `RF`, `GradBoost`, `SVM`, `MLP`.<br>**Regression models:** `RFreg`, `GBreg`. |
 | **Metrics** | Macro‑averaged **recall** (classification) &rarr; primary score.<br>MSE / RMSE / MAE / R² (regression). |
 | **Visual reporting** | • **`pdfA_*.pdf`** confusion‑matrix grids.<br>• **`pdfB_*.pdf`** permutation‑importance bar grids.<br>• **`Fig3_paper.pdf`** consolidated best‑model bars (18 × 14 in).<br>• **`importances.pdf`** supersized dot‑plot across *all* models/outcomes.<br>• **`Fig2_paper.pdf`** recall heat‑map.<br>• **`Fig1_paper.pdf`** filtered correlation matrix. |
-| **Feature export** | Three ready‑to‑use CSV subsets — importance > 0.02, top‑50 %, top‑25 % — for re‑training. |
+| **Feature export** | Three ready‑to‑use CSV subsets — importance > 0.02, top‑50 %, top‑25 % — for re‑training. | 
 
+** The subsets are obtained by the union of all predictors that fell within the top 25 % (or 50 %) permutation-importance ranks in the best-performing model for any outcome.**
 ## Implementation Notes
 
 - Scaling: numeric features → StandardScaler; categoricals → label‑encoded.

@@ -74,7 +74,8 @@ OUTCOMES = [
 
 ORDINALS = {
     "education_level":     list(range(1, 9)),   # 1‑8
-    "socioeconomic_level": list(range(1, 6))    # 1‑5
+    "socioeconomic_level": list(range(1, 6)),   # 1‑5
+    "occupation":          list(range(1, 7))    # 1‑6  ← added
 }
 
 # ───────── iterate over outcomes ───────────────────────────────────────────

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# coding: utf-8
+# coding: utf‑8
 ###############################################################################
 # 0. GLOBAL SEED  -------------------------------------------------------------
 ###############################################################################
@@ -60,6 +60,7 @@ plt.rcParams.update({
     "axes.titlesize": 20,
     "axes.labelsize": 20
 })
+plt.rcParams['axes.unicode_minus'] = True        # use the real “−” on axes
 
 ###############################################################################
 # 3. ARGUMENT PARSER  ---------------------------------------------------------
@@ -120,7 +121,9 @@ def main():
     # ------------------------------------------------------------------ #
     def draw_corr(df_corr, title, fname, ann_size, figsize):
         plt.figure(figsize=figsize)
-        sns.heatmap(df_corr, annot=True, fmt=".2f", cmap="seismic",
+        annot_txt = df_corr.round(2).astype(str).replace('-', '−', regex=True)
+        sns.heatmap(df_corr, annot=annot_txt, fmt='',
+                    cmap="seismic",
                     vmin=-1, vmax=1, linewidths=.4, linecolor='white',
                     cbar_kws={"shrink":0.6}, annot_kws={"size":ann_size})
         plt.xticks(rotation=90, ha='right', fontsize=ann_size)
@@ -133,7 +136,7 @@ def main():
     # full matrix
     draw_corr(data.corr(numeric_only=True),
               "Correlation Matrix", "full_corr_matrix.pdf",
-              ann_size=13, figsize=(26,20))
+              ann_size=13, figsize=(32,26))
 
     # filtered matrix for paper (include more vars, 30 pt font)
     CORR_TH_PAPER = 0.12      # include variables with |ρ| ≥ 0.12 to any outcome
@@ -322,7 +325,7 @@ def main():
         axes3[idx].tick_params(axis='y', labelsize=10)
         pretty_out = out.replace('_', ' ').title()
         axes3[idx].set_title(
-            f"{chr(65+idx)}) {pretty_out} – {model_name}", fontsize=18
+            f"({chr(65+idx)}) {pretty_out} – {model_name}", fontsize=18
         )
         axes3[idx].set_xlabel("Mean Decrease")
 

@@ -1,0 +1,10 @@
+Regression Metrics (MSE | RMSE | MAE | R2)
+
+gestational_age_delivery:
+  RFreg       MSE=16.48  RMSE=4.06  MAE=3.27  R2=0.02
+  GBreg       MSE=17.49  RMSE=4.18  MAE=3.10  R2=-0.04
+
+newborn_weight:
+  RFreg       MSE=763013.95  RMSE=873.51  MAE=739.23  R2=-0.09
+  GBreg       MSE=808143.05  RMSE=898.97  MAE=737.94  R2=-0.15
+

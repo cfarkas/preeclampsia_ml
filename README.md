@@ -22,6 +22,9 @@ python3 main_kfold.py --input ./out_10kfold/subset_25.csv --output ./out_10kfold
 ```
 # Cochran-Armitage trend test (exact, two‑sided) for ordinal variables
 python3 cochran_armitage.py --csv dataframe.csv --meta_xlsx PE_dataset_variables.xlsx
+
+# Exact Fisher–Freeman–Halton test for r × c tables
+python fisher_ffh.py --csv dataframe.csv --meta_xlsx PE_dataset_variables.xlsx
 ```
 ---
 

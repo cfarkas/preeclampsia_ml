@@ -1,5 +1,5 @@
 # preeclampsia_ml
-Machine learning workflow for benchmarking classical machine‑learning models on a maternal–fetal dataset.
+Machine learning workflow for benchmarking classical machine‑learning models on a maternal–fetal dataset. See: https://pmc.ncbi.nlm.nih.gov/articles/PMC12383967/
 
 ## 🚀 Quick‑start
 

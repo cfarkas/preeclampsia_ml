@@ -90,6 +90,27 @@ plt.rcParams.update({
 })
 plt.rcParams['axes.unicode_minus'] = True
 
+import shutil
+def perm_importance_safe(model, X, y, repeats=5):
+    """Permutation importance that works on Windows without WMIC."""
+    # If on Windows and `wmic` is absent, do single‑threaded.
+    n_jobs = -1
+    if os.name == "nt" and shutil.which("wmic") is None:
+        n_jobs = 1
+    try:
+        res = permutation_importance(model, X, y,
+                                     n_repeats=repeats,
+                                     random_state=SEED,
+                                     n_jobs=n_jobs)
+        return res.importances_mean
+    except Exception:
+        # absolute fallback: run serially even if the first attempt failed
+        res = permutation_importance(model, X, y,
+                                     n_repeats=repeats,
+                                     random_state=SEED,
+                                     n_jobs=1)
+        return res.importances_mean
+        
 ###############################################################################
 # 3. ARGUMENT PARSER  ---------------------------------------------------------
 ###############################################################################

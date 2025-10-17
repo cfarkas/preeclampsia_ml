@@ -12,16 +12,21 @@
 #   --exclude_cols      (extra predictor columns to drop)
 #   --exclude_co_labels (drop both Child-Obesity label columns from X)
 #   --drop-missing      (DEFAULT) drop rows w/ NaNs in predictors or outcome
-#   --replace-with-zeros replace NaNs in predictors with 0 (outcome rows w/ NaN are dropped)
+#   --replace-with-zeros replace NaNs in predictors with 0 (drops rows with NaN outcome)
 #   --pca               make PC1 vs. PC2 plots colored by each outcome
 #
+# New in this version:
+#   --width_fig1  --height_fig1   (Filtered correlation matrix size)
+#   --width_fig2  --height_fig2   (Recall heatmap size)
+#   --width_fig3  --height_fig3   (Best-model bar grids size)
+#   --imp_dot_scale --imp_dot_min (Control dot sizes in importances grid)
+#
 # Notes aligned with Info_Datasets_ML.docx:
-#   Pregnancy: outcomes = Class_PTB (1=no, 2=yes), Class_Macrosomia (1=no, 2=yes)
+#   Pregnancy: outcomes = Class_PTB (1=no, 2=yes), Class_Macrosomia (1=no, 2=yes);
 #              subsets via Class_GDM (1=no, 2=yes); can exclude 3T predictors.
-#   Child Obesity: outcomes = Clase_Sexo_1F_2M, Clase_FTO_0WT_1HET_2MUT
-#                  subsets by sex or FTO genotype; dataset has missing data.
-#                  This script does NOT impute; you must choose a missing-data
-#                  strategy: --drop-missing (default) or --replace-with-zeros.
+#   Child Obesity: outcomes = Clase_Sexo_1F_2M, Clase_FTO_0WT_1HET_2MUT;
+#                  optional sex/genotype subsets; dataset includes missing data.
+#                  This script does NOT impute. Choose a missing-data mode.
 ###############################################################################
 
 SEED = 7
@@ -98,36 +103,46 @@ def parse_arguments():
                    help=("Comma-separated outcome names (shorthand OK). "
                          "Examples: 'Class_PTB,Class_Macrosomia' or "
                          "'Clase_Sexo_1F_2M,Clase_FTO_0WT_1HET_2MUT'."))
+
     # dataset-aware helpers from the docx
     p.add_argument("--subset", type=str, default="all",
-                   choices=[
-                       "all",
-                       # pregnancy subsets (Class_GDM: 1=no, 2=yes)
-                       "gdm_yes", "gdm_no",
-                       # child obesity subsets
-                       "girls", "boys", "fto_wt", "fto_het", "fto_mut"
-                   ],
+                   choices=["all", "gdm_yes", "gdm_no", "girls", "boys",
+                            "fto_wt", "fto_het", "fto_mut"],
                    help="Filter group (see Info_Datasets_ML.docx).")
     p.add_argument("--exclude_3T", action="store_true",
                    help="Exclude predictors containing '3T' (pregnancy dataset).")
     p.add_argument("--exclude_cols", type=str, default=None,
                    help="Comma-separated list of columns to drop from predictors.")
     p.add_argument("--exclude_co_labels", action="store_true",
-                   help=("Child Obesity: also drop BOTH label columns from predictors "
+                   help=("Child Obesity: drop BOTH label columns from predictors "
                          "so neither Sex nor FTO are used as features."))
     p.add_argument("--id_col", type=str, default=None,
                    help="Optional ID column name (default: auto-detect 'ID'/'id').")
 
-    # NEW: missing-data strategy (no imputation)
+    # No-imputation missing-data strategy
     g = p.add_mutually_exclusive_group()
     g.add_argument("--drop-missing", action="store_true",
                    help="Drop rows with missing values in predictors OR the active outcome (DEFAULT).")
     g.add_argument("--replace-with-zeros", action="store_true",
                    help="Replace NaNs in predictors with 0; still drops rows where the outcome is missing.")
 
-    # NEW: PCA visualization
+    # PCA visualization
     p.add_argument("--pca", action="store_true",
                    help="Produce PC1 vs PC2 plots, colored by each selected outcome.")
+
+    # --- NEW: figure sizes for Fig1, Fig2, Fig3 ---
+    p.add_argument("--width_fig1",  type=float, default=None, help="Width (inches) for Fig1.")
+    p.add_argument("--height_fig1", type=float, default=None, help="Height (inches) for Fig1.")
+    p.add_argument("--width_fig2",  type=float, default=None, help="Width (inches) for Fig2.")
+    p.add_argument("--height_fig2", type=float, default=None, help="Height (inches) for Fig2.")
+    p.add_argument("--width_fig3",  type=float, default=None, help="Width (inches) for Fig3.")
+    p.add_argument("--height_fig3", type=float, default=None, help="Height (inches) for Fig3.")
+
+    # --- NEW: importances dot-plot scaling ---
+    p.add_argument("--imp_dot_scale", type=float, default=900.0,
+                   help="Scale factor for dot sizes in importances grid (larger -> bigger dots).")
+    p.add_argument("--imp_dot_min",   type=float, default=12.0,
+                   help="Minimum dot size in importances grid.")
 
     return p.parse_args()
 
@@ -135,7 +150,7 @@ def parse_arguments():
 # 4. STRING & OUTCOME HELPERS  ------------------------------------------------
 ###############################################################################
 def smart_read(path):
-    """Try ; , or tab as delimiters, then csv.Sniffer."""
+    """Try ; , or tab as delimiters; fall back to csv.Sniffer."""
     for d in [';', ',', '\t']:
         try:
             df = pd.read_csv(path, delimiter=d)
@@ -149,20 +164,15 @@ def smart_read(path):
     return pd.read_csv(path, delimiter=dialect.delimiter)
 
 def normalize_name(s: str) -> str:
-    """Lowercase, remove parenthetical groups and non-alnum -> underscores."""
+    """Lowercase, remove parentheses, non-alnum -> underscores."""
     s = re.sub(r'\([^)]*\)', '', s)
     s = re.sub(r'[^A-Za-z0-9]+', '_', s)
     return s.strip('_').lower()
 
 def map_outcomes_from_user(user_str: str, columns: list) -> list:
-    """
-    Map user-provided outcome tokens to actual column names.
-    Accepts shorthand like 'Class_PTB' or full names with parentheses.
-    """
+    """Map user-provided tokens to actual column names (shorthand OK)."""
     if not user_str:
         return []
-
-    # csv-style robust split (handles quoted commas)
     try:
         tokens = next(csv.reader([user_str]))
     except Exception:
@@ -170,7 +180,6 @@ def map_outcomes_from_user(user_str: str, columns: list) -> list:
     tokens = [t.strip() for t in tokens if t and t.strip()]
     if not tokens:
         return []
-
     col_norm_map = {normalize_name(c): c for c in columns}
     resolved = []
     for tok in tokens:
@@ -189,6 +198,7 @@ def map_outcomes_from_user(user_str: str, columns: list) -> list:
         for c in cands2:
             if c not in resolved:
                 resolved.append(c)
+    # dedupe preserving order
     seen = set(); final = []
     for c in resolved:
         if c not in seen and c in columns:
@@ -219,15 +229,17 @@ def is_classification_target(y: pd.Series) -> bool:
     return False
 
 def to_numeric_df(X: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert object columns to numeric where possible; non-convertible values become NaN.
-    No encoding of categories (consistent with numeric features described in docx).
-    """
+    """Convert object columns to numeric; non-convertible -> NaN."""
     X2 = X.copy()
     for c in X2.columns:
         if X2[c].dtype == 'object':
             X2[c] = pd.to_numeric(X2[c], errors='coerce')
     return X2
+
+def as_1d_axes(axes):
+    """Return a flattened 1D numpy array of axes (handles single Axes)."""
+    import numpy as _np
+    return _np.ravel(_np.atleast_1d(axes))
 
 ###############################################################################
 # 5. MAIN  --------------------------------------------------------------------
@@ -250,6 +262,12 @@ def main():
         if args.replace_with_zeros: forward += ["--replace-with-zeros"]
         if args.drop_missing: forward += ["--drop-missing"]
         if args.pca: forward += ["--pca"]
+        # propagate figure/dot flags if set
+        for k in ["width_fig1","height_fig1","width_fig2","height_fig2","width_fig3","height_fig3",
+                  "imp_dot_scale","imp_dot_min"]:
+            v = getattr(args, k, None)
+            if v is not None:
+                forward += [f"--{k}", str(v)]
         subprocess.run(["conda", "run", "-n", ENV_NAME, "python", __file__] + forward, check=True)
         sys.exit(0)
 
@@ -277,8 +295,7 @@ def main():
     # ------------------------------------------------------------------ #
     columns = list(data.columns)
     gdm_col = "Class_GDM (1=no, 2=yes)"
-    po_default_outcomes = ["Class_PTB (1=no, 2=yes)", "Class_Macrosomia (1=no, 2=yes)"]
-    co_label_cols       = ["Clase_Sexo_1F_2M", "Clase_FTO_0WT_1HET_2MUT"]
+    co_label_cols = ["Clase_Sexo_1F_2M", "Clase_FTO_0WT_1HET_2MUT"]
 
     # Outcomes
     outcomes = map_outcomes_from_user(args.outcomes, columns) or infer_default_outcomes(columns)
@@ -286,7 +303,7 @@ def main():
         print("[ERROR] Could not infer outcomes. Use --outcomes A,B or check column names.")
         sys.exit(1)
 
-    # Subset filters from docx
+    # Subset filters per docx guidance. :contentReference[oaicite:1]{index=1}
     if args.subset != "all":
         if gdm_col in columns and args.subset in ("gdm_yes", "gdm_no"):
             val = 2 if args.subset == "gdm_yes" else 1
@@ -316,13 +333,11 @@ def main():
             exclude_cols = [c.strip() for c in re.split(r'[;,]', args.exclude_cols)]
         exclude_cols = [c for c in exclude_cols if c]
 
-    # Optional drop of 3T variables (pregnancy)
     if args.exclude_3T:
         drop_3t = [c for c in columns if "3T" in c]
         exclude_cols.extend(drop_3t)
         print(f"[INFO] Dropping {len(drop_3t)} third-trimester columns (contains '3T').")
 
-    # Optional exclusion of both Child-Obesity label columns from predictors
     if args.exclude_co_labels and all(c in columns for c in co_label_cols):
         exclude_cols.extend([c for c in co_label_cols if c not in outcomes])
         print(f"[INFO] Excluding Child Obesity label columns from predictors: {co_label_cols}")
@@ -330,7 +345,7 @@ def main():
     # Final feature columns
     feature_cols = [c for c in data.columns if c not in outcomes and c not in set(exclude_cols)]
 
-    # Basic sanity checks
+    # Sanity checks
     if len(data) < 10:
         print("[ERROR] Not enough rows after filtering (< 10)."); sys.exit(1)
     if len(feature_cols) == 0:
@@ -358,12 +373,12 @@ def main():
         plt.savefig(os.path.join(args.output, fname))
         plt.close()
 
-    # full numeric matrix
+    # Full numeric matrix
     draw_corr(data.corr(numeric_only=True),
               "Correlation Matrix", "full_corr_matrix.pdf",
               ann_size=13, figsize=(max(12, 0.5*len(data.columns)+8), 24))
 
-    # filtered matrix for variables with |rho| >= 0.12 versus outcomes
+    # Filtered matrix (|rho| >= 0.12 vs outcomes) -> Fig1
     CORR_TH_PAPER = 0.12
     corr_abs = data.corr(numeric_only=True).abs()
     keep_vars = [c for c in feature_cols
@@ -372,9 +387,11 @@ def main():
     safe_block = [c for c in keep_vars if c in data.columns] + [o for o in outcomes if o in data.columns]
     safe_block = list(dict.fromkeys(safe_block))
     if len(safe_block) >= 2:
+        w1 = args.width_fig1  if args.width_fig1  is not None else max(12, 0.5*len(safe_block)+8)
+        h1 = args.height_fig1 if args.height_fig1 is not None else 22
         draw_corr(data[safe_block].corr(numeric_only=True),
                   "Filtered Correlation Matrix", "Fig1_paper.pdf",
-                  ann_size=18, figsize=(max(12, 0.5*len(safe_block)+8), 22))
+                  ann_size=18, figsize=(w1, h1))
 
     # ------------------------------------------------------------------ #
     # 5.4  MODEL DICTIONARIES
@@ -397,17 +414,17 @@ def main():
     meth_cls = list(classifiers.keys())
     meth_reg = list(regressors.keys())
 
-    # Determine outcome types
+    # Outcome types
     classification_out = [o for o in outcomes if is_classification_target(data[o])]
     continuous_out     = [o for o in outcomes if o not in classification_out]
 
-    # storage structures
+    # storage
     recall_df   = pd.DataFrame(0.0, index=classification_out, columns=meth_cls)
     reg_metrics = {}
     importances = {o: {} for o in outcomes}
     conf_mats   = {o: {} for o in classification_out}
 
-    # helper: apply missing-data strategy per outcome and return X,y cleaned
+    # helper: missing-data strategy per outcome
     def prepare_xy_for_outcome(out_col: str):
         X = data[feature_cols].copy()
         y = data[out_col].copy()
@@ -417,9 +434,8 @@ def main():
             yc = XY[out_col]
             dropped = len(X) - len(Xc)
             if dropped > 0:
-                print(f"[INFO] Missing-mode=drop: removed {dropped} rows for outcome '{out_col}'.")
+                print(f"[INFO] Missing-mode=drop: removed {dropped} rows for '{out_col}'.")
         else:
-            # replace-with-zeros on predictors; still drop rows with missing outcome
             Xc = X.fillna(0)
             mask = y.notna()
             Xc = Xc.loc[mask]
@@ -435,16 +451,14 @@ def main():
     for out in classification_out:
         Xc, yc = prepare_xy_for_outcome(out)
         if len(Xc) < 10 or len(pd.unique(yc)) < 2:
-            print(f"[WARN] Skipping classification for '{out}' (not enough samples or only one class).")
+            print(f"[WARN] Skipping classification for '{out}' (insufficient samples/classes).")
             continue
 
-        # train/test split (stratify if possible)
         Xtr_raw, Xte_raw, ytr, yte = train_test_split(
             Xc, yc, test_size=0.2,
             stratify=yc if len(pd.unique(yc)) > 1 else None,
             random_state=SEED
         )
-
         scaler = StandardScaler()
         Xtr = scaler.fit_transform(Xtr_raw)
         Xte = scaler.transform(Xte_raw)
@@ -471,13 +485,12 @@ def main():
     for out in continuous_out:
         Xc, yc = prepare_xy_for_outcome(out)
         if len(Xc) < 10:
-            print(f"[WARN] Skipping regression for '{out}' (not enough samples).")
+            print(f"[WARN] Skipping regression for '{out}' (insufficient samples).")
             continue
 
         Xtr_raw, Xte_raw, ytr, yte = train_test_split(
             Xc, yc, test_size=0.2, random_state=SEED
         )
-
         scaler = StandardScaler()
         Xtr = scaler.fit_transform(Xtr_raw)
         Xte = scaler.transform(Xte_raw)
@@ -509,7 +522,7 @@ def main():
         for out in outcomes:
             Xc, yc = prepare_xy_for_outcome(out)
             if len(Xc) < 3 or Xc.shape[1] < 2:
-                print(f"[WARN] Skipping PCA for '{out}' (need >=3 samples and >=2 features).")
+                print(f"[WARN] Skipping PCA for '{out}' (need ≥3 samples & ≥2 features).")
                 continue
 
             scaler = StandardScaler()
@@ -529,8 +542,7 @@ def main():
                 plt.legend(title=out, loc='best', fontsize=10)
             else:
                 sc = plt.scatter(pc1, pc2, c=yc.values, alpha=0.85, s=28, cmap='viridis')
-                cbar = plt.colorbar(sc)
-                cbar.set_label(out)
+                cbar = plt.colorbar(sc); cbar.set_label(out)
 
             ttl = f"PCA by {out}\nExplained variance: PC1={ev[0]*100:.1f}%, PC2={ev[1]*100:.1f}%"
             plt.title(ttl, pad=14)
@@ -553,7 +565,7 @@ def main():
             continue
         nr, nc = grid_shape(len(meth_cls))
         fig, axes = plt.subplots(nr, nc, figsize=(4.4*nc, 3.8*nr))
-        axes = axes.flatten()
+        axes = as_1d_axes(axes)
         for i, m in enumerate(meth_cls):
             if m not in conf_mats[out]:
                 axes[i].axis("off"); continue
@@ -574,7 +586,7 @@ def main():
     for out in classification_out:
         nr, nc = grid_shape(len(meth_cls))
         fig, axes = plt.subplots(nr, nc, figsize=(5.5*nc, 7*nr))
-        axes = axes.flatten()
+        axes = as_1d_axes(axes)
         for i, m in enumerate(meth_cls):
             imp_vec = importances[out].get(m, None)
             if imp_vec is None or len(imp_vec) == 0:
@@ -596,12 +608,15 @@ def main():
     # 5.10  FIGURE 3 – Best model per categorical outcome
     # ------------------------------------------------------------------ #
     if len(classification_out) > 0 and not recall_df.empty:
-        ordered_panels = classification_out  # keep order
-        best_method = {o: recall_df.loc[o, meth_cls].idxmax() for o in ordered_panels if o in recall_df.index}
+        ordered_panels = classification_out
+        best_method = {o: recall_df.loc[o, meth_cls].idxmax()
+                       for o in ordered_panels if o in recall_df.index}
 
         nr, nc = grid_shape(len(best_method))
-        fig3, axes3 = plt.subplots(nr, nc, figsize=(18, 14))
-        axes3 = axes3.flatten()
+        w3 = args.width_fig3  if args.width_fig3  is not None else 18
+        h3 = args.height_fig3 if args.height_fig3 is not None else 14
+        fig3, axes3 = plt.subplots(nr, nc, figsize=(w3, h3))
+        axes3 = as_1d_axes(axes3)
 
         for idx, out in enumerate(best_method.keys()):
             model_name = best_method[out]
@@ -609,8 +624,7 @@ def main():
             if imp_vec is None or len(imp_vec) == 0:
                 axes3[idx].axis("off"); continue
             order = np.argsort(imp_vec)[::-1]
-            axes3[idx].barh(np.array(feature_cols)[order], imp_vec[order],
-                            color='steelblue')
+            axes3[idx].barh(np.array(feature_cols)[order], imp_vec[order], color='steelblue')
             axes3[idx].invert_yaxis()
             axes3[idx].tick_params(axis='y', labelsize=10)
             pretty_out = out.replace('_', ' ').title()
@@ -626,22 +640,28 @@ def main():
         plt.close()
 
     # ------------------------------------------------------------------ #
-    # 5.11  IMPORTANCES DOT-PLOT
+    # 5.11  IMPORTANCES DOT-PLOT (bigger dots; user-tunable size)
     # ------------------------------------------------------------------ #
     all_methods = ([m for m in meth_cls if any(m in importances[o] for o in outcomes)] +
                    [m for m in meth_reg if any(m in importances[o] for o in outcomes)])
     if all_methods:
-        all_arrays = [arr for d in importances.values() for arr in d.values() if arr is not None and len(arr) > 0]
-        if all_arrays:
-            gmin = float(min(arr.min() for arr in all_arrays))
-            gmax = float(max(arr.max() for arr in all_arrays))
+        valid_arrays = [arr for d in importances.values() for arr in d.values()
+                        if arr is not None and len(arr) > 0 and np.isfinite(arr).all()]
+        if valid_arrays:
+            vals = np.abs(np.concatenate(valid_arrays))
+            p95 = np.percentile(vals, 95.0) if np.any(vals > 0) else 1.0
+            scale = float(args.imp_dot_scale)
+            smin  = float(args.imp_dot_min)
+            gmin = float(np.min(vals)) if np.isfinite(vals).all() else 0.0
+            gmax = float(np.max(vals)) if np.isfinite(vals).all() else 1.0
             if not np.isfinite(gmin) or not np.isfinite(gmax) or gmax <= gmin:
                 gmin, gmax = 0.0, 1.0
             norm = plt.Normalize(gmin, gmax); cmap = plt.cm.inferno
 
             nr, nc = grid_shape(len(all_methods))
             fig_imp, axes_imp = plt.subplots(nr, nc, figsize=(10*nc, 9*nr))
-            axes_imp = axes_imp.flatten()
+            axes_imp = as_1d_axes(axes_imp)
+
             for j, m in enumerate(all_methods):
                 mat = np.zeros((len(outcomes), len(feature_cols)))
                 for r, out in enumerate(outcomes):
@@ -652,9 +672,8 @@ def main():
                 for r in range(mat.shape[0]):
                     for c in range(mat.shape[1]):
                         val = mat[r, c]
-                        axes_imp[j].scatter(c, r,
-                                            s=280*abs(val)/(gmax+1e-9)+8,
-                                            color=cmap(norm(val)))
+                        size = smin + scale * (abs(val) / (p95 + 1e-9))
+                        axes_imp[j].scatter(c, r, s=size, color=cmap(norm(abs(val))))
                 axes_imp[j].set_xticks(range(len(feature_cols)))
                 axes_imp[j].set_xticklabels(feature_cols, rotation=90, fontsize=8)
                 axes_imp[j].set_yticks(range(len(outcomes)))
@@ -670,10 +689,12 @@ def main():
             plt.close()
 
     # ------------------------------------------------------------------ #
-    # 5.12  RECALL HEAT-MAP (Fig 2) for classification outcomes
+    # 5.12  RECALL HEAT-MAP (Fig 2)
     # ------------------------------------------------------------------ #
     if len(classification_out) > 0 and not recall_df.empty:
-        plt.figure(figsize=(1.4*len(meth_cls), 1.2*len(classification_out)))
+        w2 = args.width_fig2  if args.width_fig2  is not None else (1.4*len(meth_cls))
+        h2 = args.height_fig2 if args.height_fig2 is not None else (1.2*len(classification_out))
+        plt.figure(figsize=(w2, h2))
         sub = recall_df.loc[classification_out]
         sns.heatmap(sub, annot=True, fmt=".2f", cmap="inferno")
         plt.title("Recall Scores (macro)", pad=18)

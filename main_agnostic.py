@@ -30,7 +30,7 @@
 ###############################################################################
 
 SEED = 7
-import sys, os, subprocess, argparse, math, random, warnings, re, csv
+import sys, os, subprocess, argparse, math, random, warnings, re, csv, shutil
 import numpy as np
 np.random.seed(SEED); random.seed(SEED)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -90,10 +90,8 @@ plt.rcParams.update({
 })
 plt.rcParams['axes.unicode_minus'] = True
 
-import shutil
 def perm_importance_safe(model, X, y, repeats=5):
-    """Permutation importance that works on Windows without WMIC."""
-    # If on Windows and `wmic` is absent, do single‑threaded.
+    """Permutation importance that avoids Windows WMIC multi-process issues."""
     n_jobs = -1
     if os.name == "nt" and shutil.which("wmic") is None:
         n_jobs = 1
@@ -104,13 +102,12 @@ def perm_importance_safe(model, X, y, repeats=5):
                                      n_jobs=n_jobs)
         return res.importances_mean
     except Exception:
-        # absolute fallback: run serially even if the first attempt failed
         res = permutation_importance(model, X, y,
                                      n_repeats=repeats,
                                      random_state=SEED,
                                      n_jobs=1)
         return res.importances_mean
-        
+
 ###############################################################################
 # 3. ARGUMENT PARSER  ---------------------------------------------------------
 ###############################################################################
@@ -151,7 +148,7 @@ def parse_arguments():
     p.add_argument("--pca", action="store_true",
                    help="Produce PC1 vs PC2 plots, colored by each selected outcome.")
 
-    # --- NEW: figure sizes for Fig1, Fig2, Fig3 ---
+    # Figure sizes for Fig1, Fig2, Fig3
     p.add_argument("--width_fig1",  type=float, default=None, help="Width (inches) for Fig1.")
     p.add_argument("--height_fig1", type=float, default=None, help="Height (inches) for Fig1.")
     p.add_argument("--width_fig2",  type=float, default=None, help="Width (inches) for Fig2.")
@@ -159,7 +156,7 @@ def parse_arguments():
     p.add_argument("--width_fig3",  type=float, default=None, help="Width (inches) for Fig3.")
     p.add_argument("--height_fig3", type=float, default=None, help="Height (inches) for Fig3.")
 
-    # --- NEW: importances dot-plot scaling ---
+    # Importances dot-plot scaling (used when outcomes != 2)
     p.add_argument("--imp_dot_scale", type=float, default=900.0,
                    help="Scale factor for dot sizes in importances grid (larger -> bigger dots).")
     p.add_argument("--imp_dot_min",   type=float, default=12.0,
@@ -324,7 +321,7 @@ def main():
         print("[ERROR] Could not infer outcomes. Use --outcomes A,B or check column names.")
         sys.exit(1)
 
-    # Subset filters per docx guidance. :contentReference[oaicite:1]{index=1}
+    # Subset filters per docx guidance.
     if args.subset != "all":
         if gdm_col in columns and args.subset in ("gdm_yes", "gdm_no"):
             val = 2 if args.subset == "gdm_yes" else 1
@@ -493,10 +490,7 @@ def main():
             conf_mats[out][m] = confusion_matrix(yte, ypred)
 
             try:
-                p_res = permutation_importance(model, Xte, yte,
-                                               n_repeats=5,
-                                               random_state=SEED, n_jobs=-1)
-                importances[out][m] = p_res.importances_mean
+                importances[out][m] = perm_importance_safe(model, Xte, yte, repeats=5)
             except Exception:
                 importances[out][m] = np.zeros(len(feature_cols))
 
@@ -529,10 +523,7 @@ def main():
             reg_metrics[out][m] = (mse, rmse, mae, r2)
 
             try:
-                p_res = permutation_importance(model, Xte, yte,
-                                               n_repeats=5,
-                                               random_state=SEED, n_jobs=-1)
-                importances[out][m] = p_res.importances_mean
+                importances[out][m] = perm_importance_safe(model, Xte, yte, repeats=5)
             except Exception:
                 importances[out][m] = np.zeros(len(feature_cols))
 
@@ -661,14 +652,61 @@ def main():
         plt.close()
 
     # ------------------------------------------------------------------ #
-    # 5.11  IMPORTANCES DOT-PLOT (bigger dots; user-tunable size)
+    # 5.11  IMPORTANCES – two-outcome heatmaps (else: original dot-grid)
     # ------------------------------------------------------------------ #
-    all_methods = ([m for m in meth_cls if any(m in importances[o] for o in outcomes)] +
-                   [m for m in meth_reg if any(m in importances[o] for o in outcomes)])
-    if all_methods:
+    # Methods that appear for at least one selected outcome (preserve order)
+    all_methods = [m for m in (meth_cls + meth_reg) if any(m in importances[o] for o in outcomes)]
+
+    if len(outcomes) == 2 and len(all_methods) > 0:
+        # Build per-outcome matrices: features x methods (use |importance|)
+        def feat_method_matrix(out):
+            mat = np.zeros((len(feature_cols), len(all_methods)))
+            for j, m in enumerate(all_methods):
+                vec = importances[out].get(m, None)
+                if vec is not None and len(vec) == len(feature_cols):
+                    mat[:, j] = np.abs(vec)
+            return mat
+
+        mats = [feat_method_matrix(out) for out in outcomes]
+        # Top-K features per outcome (by max across methods)
+        K = min(15, len(feature_cols))
+        idx_lists = [np.argsort(m.max(axis=1))[::-1][:K] for m in mats]
+
+        # Global color scaling across both outcomes (max of |importance|)
+        vmax = max(float(mats[0].max()), float(mats[1].max()))
+        vmin = 0.0 if np.isfinite(vmax) else 0.0
+        if not np.isfinite(vmax) or vmax <= 0:
+            vmax = 1.0
+
+        # Figure size that adapts to #methods and rows
+        rows_total = sum(len(idx) for idx in idx_lists)
+        width = max(10, 1.0*len(all_methods) + 8)
+        height = max(8, 3 + 0.35*rows_total)
+        fig, axes = plt.subplots(2, 1, figsize=(width, height))
+        axes = as_1d_axes(axes)
+
+        for ax, out, mat, idxs in zip(axes, outcomes, mats, idx_lists):
+            msub = mat[idxs, :]
+            feats = [feature_cols[i] for i in idxs]
+            sns.heatmap(msub, ax=ax, cmap="inferno", vmin=vmin, vmax=vmax,
+                        xticklabels=all_methods, yticklabels=feats, cbar=False)
+            ax.set_title(f"Feature Importances – {out}")
+            ax.set_xlabel("Methods"); ax.set_ylabel("Top features")
+
+        # Shared colorbar
+        sm = plt.cm.ScalarMappable(cmap=plt.cm.inferno, norm=plt.Normalize(vmin, vmax))
+        cax = fig.add_axes([0.92, 0.25, 0.02, 0.5])
+        fig.colorbar(sm, cax=cax, label="|Permutation importance|")
+        fig.subplots_adjust(right=0.9, hspace=0.35, left=0.25)
+        plt.tight_layout(rect=[0.04, 0.04, 0.9, 0.98])
+        plt.savefig(os.path.join(args.output, "importances.pdf"))
+        plt.close()
+
+    else:
+        # ---- original dot-grid (bigger, tunable) ----
         valid_arrays = [arr for d in importances.values() for arr in d.values()
                         if arr is not None and len(arr) > 0 and np.isfinite(arr).all()]
-        if valid_arrays:
+        if valid_arrays and len(all_methods) > 0:
             vals = np.abs(np.concatenate(valid_arrays))
             p95 = np.percentile(vals, 95.0) if np.any(vals > 0) else 1.0
             scale = float(args.imp_dot_scale)
@@ -678,6 +716,12 @@ def main():
             if not np.isfinite(gmin) or not np.isfinite(gmax) or gmax <= gmin:
                 gmin, gmax = 0.0, 1.0
             norm = plt.Normalize(gmin, gmax); cmap = plt.cm.inferno
+
+            def grid_shape(n):
+                if n <= 4:   return (1, n)
+                if n <= 6:   return (2, 3)
+                if n <= 9:   return (3, 3)
+                return (3, 4)
 
             nr, nc = grid_shape(len(all_methods))
             fig_imp, axes_imp = plt.subplots(nr, nc, figsize=(10*nc, 9*nr))
